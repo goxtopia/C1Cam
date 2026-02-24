@@ -15,6 +15,7 @@ import android.util.Log
 import android.widget.Button
 import android.widget.ImageView
 import android.widget.Toast
+import android.view.View
 import android.widget.ToggleButton
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -104,6 +105,12 @@ class MainActivity : AppCompatActivity() {
         editModeToggle.setOnCheckedChangeListener { _, isChecked ->
             overlay.isEditMode = isChecked
             overlay.invalidate()
+
+            val visibility = if (isChecked) View.GONE else View.VISIBLE
+            captureButton.visibility = visibility
+            focusSlider.visibility = visibility
+            settingsButton.visibility = visibility
+            previewRectified.visibility = visibility
         }
 
         settingsButton.setOnClickListener {
