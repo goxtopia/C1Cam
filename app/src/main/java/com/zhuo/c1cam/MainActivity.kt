@@ -51,9 +51,19 @@ class MainActivity : AppCompatActivity() {
     private lateinit var overlay: OverlayView
     private lateinit var previewRectified: ImageView
     private lateinit var focusSlider: Slider
+    private lateinit var evSlider: Slider
     private lateinit var captureButton: Button
     private lateinit var settingsButton: Button
     private lateinit var editModeToggle: ToggleButton
+    private lateinit var topControls: View
+    private lateinit var bottomControls: View
+    private lateinit var cameraContainer: View
+
+    private var isFullscreen = false
+
+    private var savedFocusVal: Float = 0.0f
+    private var savedEvVal: Float = 0.0f
+    private var savedPoints: List<PointF>? = null
 
     private var imageCapture: ImageCapture? = null
     private var imageAnalysis: ImageAnalysis? = null
@@ -92,9 +102,22 @@ class MainActivity : AppCompatActivity() {
         overlay = findViewById(R.id.overlay)
         previewRectified = findViewById(R.id.preview_rectified)
         focusSlider = findViewById(R.id.focus_slider)
+        evSlider = findViewById(R.id.ev_slider)
         captureButton = findViewById(R.id.capture_button)
         settingsButton = findViewById(R.id.settings_button)
         editModeToggle = findViewById(R.id.edit_mode_toggle)
+        topControls = findViewById(R.id.top_controls)
+        bottomControls = findViewById(R.id.bottom_controls)
+        cameraContainer = findViewById(R.id.camera_container)
+
+        loadSettings()
+
+        // Restore UI values
+        focusSlider.value = savedFocusVal
+        evSlider.value = savedEvVal
+        if (savedPoints != null) {
+            overlay.setNormalizedPoints(savedPoints!!)
+        }
 
         focusSlider.addOnChangeListener { _, value, fromUser ->
             if (fromUser) {
@@ -102,15 +125,19 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        evSlider.addOnChangeListener { _, value, fromUser ->
+            if (fromUser) {
+                setExposureCompensation(value)
+            }
+        }
+
         editModeToggle.setOnCheckedChangeListener { _, isChecked ->
             overlay.isEditMode = isChecked
             overlay.invalidate()
+        }
 
-            val visibility = if (isChecked) View.GONE else View.VISIBLE
-            captureButton.visibility = visibility
-            focusSlider.visibility = visibility
-            settingsButton.visibility = visibility
-            previewRectified.visibility = visibility
+        overlay.onDoubleTapListener = {
+            toggleFullscreen()
         }
 
         settingsButton.setOnClickListener {
@@ -317,12 +344,35 @@ class MainActivity : AppCompatActivity() {
 
                 // Initialize focus to current slider value
                 setFocusDistance(focusSlider.value)
+                setExposureCompensation(evSlider.value)
 
             } catch (exc: Exception) {
                 Log.e(TAG, "Use case binding failed", exc)
             }
 
         }, ContextCompat.getMainExecutor(this))
+    }
+
+    private fun setExposureCompensation(evValue: Float) {
+        val cam = camera ?: return
+        val exposureState = cam.cameraInfo.exposureState
+        if (!exposureState.isExposureCompensationSupported) return
+
+        val step = exposureState.exposureCompensationStep
+        val range = exposureState.exposureCompensationRange
+
+        // EV = index * step
+        // index = EV / step
+        // Avoid division by zero if step is somehow rational zero, but usually it's not.
+        // Step is Rational. toFloat().
+
+        val stepVal = step.toFloat()
+        if (stepVal == 0f) return
+
+        val index = (evValue / stepVal).toInt()
+        val clampedIndex = index.coerceIn(range.lower, range.upper)
+
+        cam.cameraControl.setExposureCompensationIndex(clampedIndex)
     }
 
     @OptIn(ExperimentalCamera2Interop::class)
@@ -371,12 +421,88 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        saveSettings()
         cameraExecutor.shutdown()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        saveSettings()
+    }
+
+    private fun loadSettings() {
+        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        targetAspectRatio = prefs.getFloat(KEY_ASPECT_RATIO, 1.414f)
+        savedFocusVal = prefs.getFloat(KEY_FOCUS_VAL, 0.0f)
+        savedEvVal = prefs.getFloat(KEY_EV_VAL, 0.0f)
+
+        val pointsStr = prefs.getString(KEY_POINTS, null)
+        if (pointsStr != null) {
+            val parts = pointsStr.split(",")
+            if (parts.size == 8) {
+                try {
+                    val pts = mutableListOf<PointF>()
+                    for (i in 0 until 4) {
+                        pts.add(PointF(parts[i*2].toFloat(), parts[i*2+1].toFloat()))
+                    }
+                    savedPoints = pts
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error parsing points", e)
+                }
+            }
+        }
+    }
+
+    private fun saveSettings() {
+        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        val editor = prefs.edit()
+        editor.putFloat(KEY_ASPECT_RATIO, targetAspectRatio)
+        editor.putFloat(KEY_FOCUS_VAL, focusSlider.value)
+        editor.putFloat(KEY_EV_VAL, evSlider.value)
+
+        val pts = overlay.getNormalizedPoints()
+        if (pts.size == 4) {
+             val sb = StringBuilder()
+             for (p in pts) {
+                 sb.append("${p.x},${p.y},")
+             }
+             if (sb.isNotEmpty()) sb.setLength(sb.length - 1)
+             editor.putString(KEY_POINTS, sb.toString())
+        }
+
+        editor.apply()
+    }
+
+    private fun toggleFullscreen() {
+        isFullscreen = !isFullscreen
+        val params = cameraContainer.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
+
+        if (isFullscreen) {
+            // Match Parent
+            params.height = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.MATCH_PARENT
+            params.width = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.MATCH_PARENT
+
+            topControls.visibility = View.GONE
+            bottomControls.visibility = View.GONE
+        } else {
+            // Match Constraints (0dp)
+            params.height = 0
+            params.width = 0
+
+            topControls.visibility = View.VISIBLE
+            bottomControls.visibility = View.VISIBLE
+        }
+        cameraContainer.layoutParams = params
     }
 
     companion object {
         private const val TAG = "C1Cam"
         private const val FILENAME_FORMAT = "yyyy-MM-dd-HH-mm-ss-SSS"
+        private const val PREFS_NAME = "C1CamPrefs"
+        private const val KEY_ASPECT_RATIO = "aspect_ratio"
+        private const val KEY_FOCUS_VAL = "focus_val"
+        private const val KEY_EV_VAL = "ev_val"
+        private const val KEY_POINTS = "points"
         private val REQUIRED_PERMISSIONS =
             mutableListOf(
                 Manifest.permission.CAMERA

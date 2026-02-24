@@ -7,6 +7,7 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PointF
 import android.util.AttributeSet
+import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.View
 import kotlin.math.hypot
@@ -14,6 +15,15 @@ import kotlin.math.hypot
 class OverlayView @JvmOverloads constructor(
     context: Context, attrs: AttributeSet? = null, defStyleAttr: Int = 0
 ) : View(context, attrs, defStyleAttr) {
+
+    var onDoubleTapListener: (() -> Unit)? = null
+
+    private val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
+        override fun onDoubleTap(e: MotionEvent): Boolean {
+            onDoubleTapListener?.invoke()
+            return true
+        }
+    })
 
     private val paintPoint = Paint().apply {
         color = Color.YELLOW
@@ -90,7 +100,11 @@ class OverlayView @JvmOverloads constructor(
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (!isEditMode) return false
+        if (gestureDetector.onTouchEvent(event)) {
+            return true
+        }
+
+        if (!isEditMode) return true
 
         when (event.action) {
             MotionEvent.ACTION_DOWN -> {
@@ -133,5 +147,19 @@ class OverlayView @JvmOverloads constructor(
         if (!isInitialized || width == 0 || height == 0) return emptyList()
         // Return a copy to avoid modification
         return points.map { PointF(it.x / width, it.y / height) }
+    }
+
+    fun setNormalizedPoints(normalizedPoints: List<PointF>) {
+        if (normalizedPoints.size != 4) return
+
+        // Store them to apply when size is ready
+        post {
+            if (width > 0 && height > 0) {
+                points.clear()
+                points.addAll(normalizedPoints.map { PointF(it.x * width, it.y * height) })
+                isInitialized = true
+                invalidate()
+            }
+        }
     }
 }
