@@ -64,6 +64,8 @@ class MainActivity : AppCompatActivity() {
     private var savedFocusVal: Float = 0.0f
     private var savedEvVal: Float = 0.0f
     private var savedPoints: List<PointF>? = null
+    private var currentLutName: String? = null
+    private var currentLut: Lut3D? = null
 
     private var imageCapture: ImageCapture? = null
     private var imageAnalysis: ImageAnalysis? = null
@@ -141,7 +143,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         settingsButton.setOnClickListener {
-            showAspectRatioDialog()
+            showSettingsMenu()
         }
 
         captureButton.setOnClickListener {
@@ -158,6 +160,20 @@ class MainActivity : AppCompatActivity() {
         cameraExecutor = Executors.newSingleThreadExecutor()
     }
 
+    private fun showSettingsMenu() {
+        val options = arrayOf("Target Aspect Ratio", "Select LUT")
+
+        AlertDialog.Builder(this)
+            .setTitle("Settings")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> showAspectRatioDialog()
+                    1 -> showLutDialog()
+                }
+            }
+            .show()
+    }
+
     private fun showAspectRatioDialog() {
         val options = arrayOf("Original", "A4 (1.414)", "Letter (1.294)", "4:3 (1.333)", "16:9 (1.778)")
         val values = floatArrayOf(0f, 1.414f, 1.294f, 1.333f, 1.778f)
@@ -167,6 +183,33 @@ class MainActivity : AppCompatActivity() {
             .setItems(options) { dialog, which ->
                 targetAspectRatio = values[which]
                 Toast.makeText(this, "Aspect Ratio set to ${options[which]}", Toast.LENGTH_SHORT).show()
+            }
+            .show()
+    }
+
+    private fun showLutDialog() {
+        val lutFiles = mutableListOf<String>()
+        lutFiles.add("None")
+        try {
+            val files = assets.list("luts")
+            files?.filter { it.endsWith(".cube") }?.forEach { lutFiles.add(it) }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error listing assets", e)
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Select LUT")
+            .setItems(lutFiles.toTypedArray()) { _, which ->
+                val selected = lutFiles[which]
+                if (selected == "None") {
+                    currentLutName = null
+                    currentLut = null
+                    Toast.makeText(this, "LUT cleared", Toast.LENGTH_SHORT).show()
+                } else {
+                    currentLutName = selected
+                    currentLut = LutUtils.loadLut(this, selected)
+                    Toast.makeText(this, "LUT loaded: $selected", Toast.LENGTH_SHORT).show()
+                }
             }
             .show()
     }
@@ -216,8 +259,13 @@ class MainActivity : AppCompatActivity() {
         // Rectify
         val rectifiedBitmap = RectificationUtils.rectifyBitmap(uprightBitmap, mappedPoints, targetAspectRatio)
 
+        // Apply LUT if active
+        val finalBitmap = currentLut?.let {
+            LutUtils.applyLut(rectifiedBitmap, it)
+        } ?: rectifiedBitmap
+
         // Save
-        saveBitmapToGallery(rectifiedBitmap)
+        saveBitmapToGallery(finalBitmap)
     }
 
     private fun mapPointsToImage(normalizedViewPoints: List<PointF>, imageW: Int, imageH: Int, viewW: Int, viewH: Int): List<PointF> {
@@ -322,8 +370,13 @@ class MainActivity : AppCompatActivity() {
                 if (points.size == 4 && viewW > 0 && viewH > 0) {
                     val mappedPoints = mapPointsToImage(points, rotatedBitmap.width, rotatedBitmap.height, viewW, viewH)
                     val rectified = RectificationUtils.rectifyBitmap(rotatedBitmap, mappedPoints, targetAspectRatio)
+
+                    val finalPreview = currentLut?.let {
+                        LutUtils.applyLut(rectified, it)
+                    } ?: rectified
+
                     runOnUiThread {
-                        previewRectified.setImageBitmap(rectified)
+                        previewRectified.setImageBitmap(finalPreview)
                     }
                 }
 
@@ -435,6 +488,11 @@ class MainActivity : AppCompatActivity() {
         targetAspectRatio = prefs.getFloat(KEY_ASPECT_RATIO, 1.414f)
         savedFocusVal = prefs.getFloat(KEY_FOCUS_VAL, 0.0f)
         savedEvVal = prefs.getFloat(KEY_EV_VAL, 0.0f)
+        currentLutName = prefs.getString(KEY_LUT_NAME, null)
+
+        if (currentLutName != null) {
+            currentLut = LutUtils.loadLut(this, currentLutName!!)
+        }
 
         val pointsStr = prefs.getString(KEY_POINTS, null)
         if (pointsStr != null) {
@@ -459,6 +517,7 @@ class MainActivity : AppCompatActivity() {
         editor.putFloat(KEY_ASPECT_RATIO, targetAspectRatio)
         editor.putFloat(KEY_FOCUS_VAL, focusSlider.value)
         editor.putFloat(KEY_EV_VAL, evSlider.value)
+        editor.putString(KEY_LUT_NAME, currentLutName)
 
         val pts = overlay.getNormalizedPoints()
         if (pts.size == 4) {
@@ -503,6 +562,7 @@ class MainActivity : AppCompatActivity() {
         private const val KEY_FOCUS_VAL = "focus_val"
         private const val KEY_EV_VAL = "ev_val"
         private const val KEY_POINTS = "points"
+        private const val KEY_LUT_NAME = "lut_name"
         private val REQUIRED_PERMISSIONS =
             mutableListOf(
                 Manifest.permission.CAMERA
