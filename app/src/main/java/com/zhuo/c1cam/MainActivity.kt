@@ -128,7 +128,22 @@ class MainActivity : AppCompatActivity() {
         }
 
         editModeToggle.setOnCheckedChangeListener { _, isChecked ->
+            if (isChecked && isRectifiedMain) {
+                // Not allowed when camera is not main view
+                editModeToggle.isChecked = false
+                Toast.makeText(this, "Can only edit when camera is main view", Toast.LENGTH_SHORT).show()
+                return@setOnCheckedChangeListener
+            }
+            
             overlay.isEditMode = isChecked
+            
+            if (isChecked) {
+                pipViewContainer.visibility = View.GONE
+            } else {
+                if (!isFullscreen) {
+                    pipViewContainer.visibility = View.VISIBLE
+                }
+            }
             overlay.invalidate()
         }
 
@@ -281,6 +296,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun swapViews() {
+        if (overlay.isEditMode) {
+            Toast.makeText(this, "Exit edit mode before swapping views", Toast.LENGTH_SHORT).show()
+            return
+        }
+        
         isRectifiedMain = !isRectifiedMain
 
         val cameraParent = cameraContainer.parent as android.view.ViewGroup
