@@ -52,14 +52,19 @@ class MainActivity : AppCompatActivity() {
     private lateinit var previewRectified: ImageView
     private lateinit var focusSlider: Slider
     private lateinit var evSlider: Slider
-    private lateinit var captureButton: Button
+    private lateinit var captureButton: com.google.android.material.floatingactionbutton.FloatingActionButton
     private lateinit var settingsButton: Button
     private lateinit var editModeToggle: ToggleButton
     private lateinit var topControls: View
     private lateinit var bottomControls: View
+    private lateinit var mainViewContainer: android.widget.FrameLayout
+    private lateinit var pipFrame: android.widget.FrameLayout
+    private lateinit var pipViewContainer: androidx.cardview.widget.CardView
+    private lateinit var pipTouchBlocker: View
     private lateinit var cameraContainer: View
 
     private var isFullscreen = false
+    private var isRectifiedMain = false
 
     private var savedFocusVal: Float = 0.0f
     private var savedEvVal: Float = 0.0f
@@ -115,6 +120,10 @@ class MainActivity : AppCompatActivity() {
         topControls = findViewById(R.id.top_controls)
         bottomControls = findViewById(R.id.bottom_controls)
         cameraContainer = findViewById(R.id.camera_container)
+        mainViewContainer = findViewById(R.id.main_view_container)
+        pipFrame = findViewById(R.id.pip_frame)
+        pipViewContainer = findViewById(R.id.pip_view_container)
+        pipTouchBlocker = findViewById(R.id.pip_touch_blocker)
 
         loadSettings()
 
@@ -148,6 +157,10 @@ class MainActivity : AppCompatActivity() {
 
         settingsButton.setOnClickListener {
             showSettingsMenu()
+        }
+
+        pipTouchBlocker.setOnClickListener {
+            swapViews()
         }
 
         captureButton.setOnClickListener {
@@ -600,7 +613,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun toggleFullscreen() {
         isFullscreen = !isFullscreen
-        val params = cameraContainer.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
+        val params = mainViewContainer.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
 
         if (isFullscreen) {
             // Match Parent
@@ -609,6 +622,7 @@ class MainActivity : AppCompatActivity() {
 
             topControls.visibility = View.GONE
             bottomControls.visibility = View.GONE
+            pipViewContainer.visibility = View.GONE
         } else {
             // Match Constraints (0dp)
             params.height = 0
@@ -616,8 +630,54 @@ class MainActivity : AppCompatActivity() {
 
             topControls.visibility = View.VISIBLE
             bottomControls.visibility = View.VISIBLE
+            pipViewContainer.visibility = View.VISIBLE
         }
-        cameraContainer.layoutParams = params
+        mainViewContainer.layoutParams = params
+    }
+
+    private fun swapViews() {
+        isRectifiedMain = !isRectifiedMain
+
+        // Remove views from their current parents
+        val cameraParent = cameraContainer.parent as android.view.ViewGroup
+        val previewParent = previewRectified.parent as android.view.ViewGroup
+        
+        cameraParent.removeView(cameraContainer)
+        previewParent.removeView(previewRectified)
+
+        if (isRectifiedMain) {
+            // Rectified goes to main, camera goes to pip
+            mainViewContainer.addView(previewRectified)
+            pipFrame.addView(cameraContainer)
+            
+            // Disable interaction on overlay since it's just for PiP display now
+            overlay.isEnabled = false
+            
+            // Allow double tap on rectified image to toggle fullscreen
+            previewRectified.setOnClickListener(null)
+            previewRectified.setOnTouchListener(object : View.OnTouchListener {
+                private var lastClickTime: Long = 0
+                override fun onTouch(v: View, event: android.view.MotionEvent): Boolean {
+                    if (event.action == android.view.MotionEvent.ACTION_UP) {
+                        val clickTime = System.currentTimeMillis()
+                        if (clickTime - lastClickTime < 300) {
+                            toggleFullscreen()
+                        }
+                        lastClickTime = clickTime
+                    }
+                    return true
+                }
+            })
+            
+        } else {
+            // Camera goes to main, rectified goes to pip
+            mainViewContainer.addView(cameraContainer)
+            pipFrame.addView(previewRectified)
+            
+            overlay.isEnabled = true
+            
+            previewRectified.setOnTouchListener(null)
+        }
     }
 
     companion object {
