@@ -67,6 +67,10 @@ class MainActivity : AppCompatActivity() {
     private var currentLutName: String? = null
     private var currentLut: Lut3D? = null
 
+    private var isSportsMode = false
+    private var isNoiseReductionOff = false
+    private var isEdgeModeOff = false
+
     private var imageCapture: ImageCapture? = null
     private var imageAnalysis: ImageAnalysis? = null
     private lateinit var cameraExecutor: ExecutorService
@@ -161,7 +165,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showSettingsMenu() {
-        val options = arrayOf("Target Aspect Ratio", "Select LUT")
+        val options = arrayOf("Target Aspect Ratio", "Select LUT", "Advanced Settings")
 
         AlertDialog.Builder(this)
             .setTitle("Settings")
@@ -169,8 +173,32 @@ class MainActivity : AppCompatActivity() {
                 when (which) {
                     0 -> showAspectRatioDialog()
                     1 -> showLutDialog()
+                    2 -> showAdvancedSettingsDialog()
                 }
             }
+            .show()
+    }
+
+    private fun showAdvancedSettingsDialog() {
+        val options = arrayOf("Sports Mode", "Disable Noise Reduction", "Disable Edge Sharpening")
+        val checkedItems = booleanArrayOf(isSportsMode, isNoiseReductionOff, isEdgeModeOff)
+
+        AlertDialog.Builder(this)
+            .setTitle("Advanced Settings")
+            .setMultiChoiceItems(options, checkedItems) { _, which, isChecked ->
+                when (which) {
+                    0 -> isSportsMode = isChecked
+                    1 -> isNoiseReductionOff = isChecked
+                    2 -> isEdgeModeOff = isChecked
+                }
+            }
+            .setPositiveButton("OK") { _, _ ->
+                saveSettings()
+                updateCameraSettings()
+                // Re-apply manual focus in case mode changed
+                setFocusDistance(focusSlider.value)
+            }
+            .setNegativeButton("Cancel", null)
             .show()
     }
 
@@ -396,7 +424,8 @@ class MainActivity : AppCompatActivity() {
                     this, cameraSelector, preview, imageCapture, imageAnalysis
                 )
 
-                // Initialize focus to current slider value
+                // Initialize settings
+                updateCameraSettings()
                 setFocusDistance(focusSlider.value)
                 setExposureCompensation(evSlider.value)
 
@@ -405,6 +434,39 @@ class MainActivity : AppCompatActivity() {
             }
 
         }, ContextCompat.getMainExecutor(this))
+    }
+
+    @OptIn(ExperimentalCamera2Interop::class)
+    private fun updateCameraSettings() {
+        val cam = camera ?: return
+        val cameraControl = Camera2CameraControl.from(cam.cameraControl)
+
+        val optionsBuilder = CaptureRequestOptions.Builder()
+
+        // Sports Mode
+        if (isSportsMode) {
+             optionsBuilder.setCaptureRequestOption(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_USE_SCENE_MODE)
+             optionsBuilder.setCaptureRequestOption(CaptureRequest.CONTROL_SCENE_MODE, CaptureRequest.CONTROL_SCENE_MODE_ACTION)
+        } else {
+             optionsBuilder.setCaptureRequestOption(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
+             optionsBuilder.setCaptureRequestOption(CaptureRequest.CONTROL_SCENE_MODE, CaptureRequest.CONTROL_SCENE_MODE_DISABLED)
+        }
+
+        // Noise Reduction
+        if (isNoiseReductionOff) {
+            optionsBuilder.setCaptureRequestOption(CaptureRequest.NOISE_REDUCTION_MODE, CaptureRequest.NOISE_REDUCTION_MODE_OFF)
+        } else {
+            optionsBuilder.setCaptureRequestOption(CaptureRequest.NOISE_REDUCTION_MODE, CaptureRequest.NOISE_REDUCTION_MODE_FAST)
+        }
+
+        // Edge Mode
+        if (isEdgeModeOff) {
+            optionsBuilder.setCaptureRequestOption(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_OFF)
+        } else {
+            optionsBuilder.setCaptureRequestOption(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_FAST)
+        }
+
+        cameraControl.addCaptureRequestOptions(optionsBuilder.build())
     }
 
     private fun setExposureCompensation(evValue: Float) {
@@ -460,7 +522,7 @@ class MainActivity : AppCompatActivity() {
             .setCaptureRequestOption(CaptureRequest.LENS_FOCUS_DISTANCE, diopter)
             .build()
 
-        cameraControl.setCaptureRequestOptions(options)
+        cameraControl.addCaptureRequestOptions(options)
     }
 
     private fun requestPermissions() {
@@ -519,6 +581,9 @@ class MainActivity : AppCompatActivity() {
         editor.putFloat(KEY_FOCUS_VAL, focusSlider.value)
         editor.putFloat(KEY_EV_VAL, evSlider.value)
         editor.putString(KEY_LUT_NAME, currentLutName)
+        editor.putBoolean(KEY_SPORTS_MODE, isSportsMode)
+        editor.putBoolean(KEY_NR_OFF, isNoiseReductionOff)
+        editor.putBoolean(KEY_EDGE_OFF, isEdgeModeOff)
 
         val pts = overlay.getNormalizedPoints()
         if (pts.size == 4) {
@@ -564,6 +629,9 @@ class MainActivity : AppCompatActivity() {
         private const val KEY_EV_VAL = "ev_val"
         private const val KEY_POINTS = "points"
         private const val KEY_LUT_NAME = "lut_name"
+        private const val KEY_SPORTS_MODE = "sports_mode"
+        private const val KEY_NR_OFF = "nr_off"
+        private const val KEY_EDGE_OFF = "edge_off"
         private val REQUIRED_PERMISSIONS =
             mutableListOf(
                 Manifest.permission.CAMERA
