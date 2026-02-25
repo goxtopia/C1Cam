@@ -288,6 +288,11 @@ class MainActivity : AppCompatActivity() {
         
         cameraParent.removeView(cameraContainer)
         previewParent.removeView(previewRectified)
+        
+        // Save absolute points using camera dimensions before view resizes
+        val oldW = cameraContainer.width.toFloat()
+        val oldH = cameraContainer.height.toFloat()
+        val rawPoints = overlay.getNormalizedPoints().map { android.graphics.PointF(it.x * oldW, it.y * oldH) }
 
         if (isRectifiedMain) {
             mainViewContainer.addView(previewRectified)
@@ -316,6 +321,70 @@ class MainActivity : AppCompatActivity() {
             
             overlay.isEnabled = true
             previewRectified.setOnTouchListener(null)
+        }
+        
+        // Restore points to match new aspect ratio preserving physical image coordinates
+        // This is tricky because layout hasn't happened yet. We can use a ViewTreeObserver
+        // or just post it to the message queue so layout finishes.
+        cameraContainer.post {
+            val newW = cameraContainer.width.toFloat()
+            val newH = cameraContainer.height.toFloat()
+            if (oldW > 0 && oldH > 0 && newW > 0 && newH > 0) {
+                // Determine the image scales and letterbox offsets for old and new bounds.
+                // We don't have exact image size here, but we know the camera aspect ratio is fixed (e.g. 4:3).
+                // Usually it's 4:3 backwards (3:4 portrait)
+                // We'll estimate the aspect ratio by taking the PreviewView's latest frame, 
+                // but we don't have it explicitly.
+                // For a simpler heuristic, since we know ImageAnalysis gets a specific resolution (or we can just let 
+                // OverlayView keep its original normalized points relative to the image).
+                // Actually, OverlayView's built-in onSizeChanged blindly scales the points by (newW/oldW), 
+                // warping the aspect ratio if newW/newH != oldW/oldH.
+                // Let's counteract that warping!
+                // To do this properly, we should compute the letterbox Rect of the image inside old bounds,
+                // map points to [0..1] of that Rect, then compute letterbox Rect inside new bounds,
+                // and map points back.
+                
+                // Assuming typical 3:4 portrait camera aspect ratio (height > width):
+                val imgVertRatio = 4f/3f 
+                
+                fun getLetterboxRect(vw: Float, vh: Float, imgRatio: Float): android.graphics.RectF {
+                    val scale = kotlin.math.min(vw, vh / imgRatio)
+                    // If vw / vh < 1 / imgRatio (i.e. vw is bottleneck), scale is vw. (Since imgRatio > 1, 1/imgRatio < 1).
+                    // Wait, standard fitCenter sets scale = min(vw / imgW, vh / imgH).
+                    val scaleActual = kotlin.math.min(vw, vh / imgRatio)
+                    val outW = scaleActual
+                    val outH = scaleActual * imgRatio
+                    val dx = (vw - outW) / 2
+                    val dy = (vh - outH) / 2
+                    return android.graphics.RectF(dx, dy, dx + outW, dy + outH)
+                }
+                
+                val oldRect = getLetterboxRect(oldW, oldH, imgVertRatio)
+                val newRect = getLetterboxRect(newW, newH, imgVertRatio)
+                
+                // Map rawPoints (old layout) to normalized Image space
+                val imgPoints = rawPoints.map { p ->
+                    android.graphics.PointF(
+                        (p.x - oldRect.left) / oldRect.width(),
+                        (p.y - oldRect.top) / oldRect.height()
+                    )
+                }
+                
+                // Map normalized Image space to new layout space
+                val mappedNewPoints = imgPoints.map { p ->
+                    android.graphics.PointF(
+                        newRect.left + p.x * newRect.width(),
+                        newRect.top + p.y * newRect.height()
+                    )
+                }
+                
+                // Convert back to [0..1] normalized View coordinates for OverlayView
+                val newNormPoints = mappedNewPoints.map { p ->
+                    android.graphics.PointF(p.x / newW, p.y / newH)
+                }
+                
+                overlay.setNormalizedPoints(newNormPoints)
+            }
         }
     }
 
