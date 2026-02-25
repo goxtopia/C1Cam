@@ -94,8 +94,8 @@ class ImageProcessor(private val context: Context) {
         val fViewW = viewW.toFloat()
         val fViewH = viewH.toFloat()
 
-        // Assuming FILL_CENTER logic (scale to fill)
-        val scale = max(fViewW / imageW, fViewH / imageH)
+        // FIT_CENTER logic (scale to fit)
+        val scale = kotlin.math.min(fViewW / imageW, fViewH / imageH)
 
         val scaledW = imageW * scale
         val scaledH = imageH * scale
