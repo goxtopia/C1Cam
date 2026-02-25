@@ -184,6 +184,8 @@ object ChromaNoiseReduction {
             GLES20.glGenTextures(1, texIds, 0)
             val outputTexId = texIds[0]
 
+            // Activate a different texture unit to avoid overwriting texV on GL_TEXTURE2
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE3)
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, outputTexId)
             GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, width, height, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null)
             GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
@@ -198,6 +200,15 @@ object ChromaNoiseReduction {
 
             GLES20.glViewport(0, 0, width, height)
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+
+            // Explicitly re-bind textures in case they were overwritten by FBO or other ops
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texY)
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE1)
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texU)
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE2)
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texV)
+
             GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
             checkGlError("glDrawArrays")
 
@@ -275,6 +286,11 @@ object ChromaNoiseReduction {
                     Log.w(TAG, "Row $y: Not enough bytes. Needed $width, has $remaining")
                     buffer.get(rowBuffer, 0, remaining)
                     output.put(rowBuffer, 0, remaining)
+                    // Pad the rest of the row
+                    val padding = if (name == "Y") 0.toByte() else 128.toByte()
+                    for (p in remaining until width) {
+                        output.put(padding)
+                    }
                 } else {
                     buffer.get(rowBuffer, 0, width)
                     output.put(rowBuffer, 0, width)
@@ -289,13 +305,15 @@ object ChromaNoiseReduction {
                 }
 
                 buffer.get(rowBuffer, 0, bytesToRead)
+                val padding = if (name == "Y") 0.toByte() else 128.toByte()
 
                 for (x in 0 until width) {
                     val idx = x * pixelStride
                     if (idx < bytesToRead) {
                         output.put(rowBuffer[idx])
+                    } else {
+                        output.put(padding)
                     }
-                    // No else needed, default is 128
                 }
             }
         }
