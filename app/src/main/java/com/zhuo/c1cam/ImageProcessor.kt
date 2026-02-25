@@ -22,11 +22,24 @@ class ImageProcessor(private val context: Context) {
         viewW: Int,
         viewH: Int,
         targetAspectRatio: Float,
-        currentLut: Lut3D?
+        currentLut: Lut3D?,
+        isChromaDenoiseOn: Boolean
     ) {
         val rotationDegrees = imageProxy.imageInfo.rotationDegrees
-        val bitmap = imageProxy.toBitmap()
-        imageProxy.close() // Close immediately after conversion
+
+        // Convert to Bitmap, applying Chroma Noise Reduction if enabled
+        val bitmap = try {
+            if (isChromaDenoiseOn) {
+                ChromaNoiseReduction.process(imageProxy)
+            } else {
+                imageProxy.toBitmap()
+            }
+        } catch (e: Exception) {
+            Log.e("ImageProcessor", "Error during image processing", e)
+            imageProxy.toBitmap()
+        } finally {
+            imageProxy.close()
+        }
 
         // Rotate to upright
         val uprightBitmap = if (rotationDegrees != 0) {

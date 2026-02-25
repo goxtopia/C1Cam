@@ -14,6 +14,7 @@ class AppSettings(private val context: Context) {
     var isSportsMode = false
     var isNoiseReductionOff = false
     var isEdgeModeOff = false
+    var isChromaDenoiseOn = false
     var savedPoints: List<PointF>? = null
 
     init {
@@ -28,6 +29,7 @@ class AppSettings(private val context: Context) {
         isSportsMode = prefs.getBoolean(KEY_SPORTS_MODE, false)
         isNoiseReductionOff = prefs.getBoolean(KEY_NR_OFF, false)
         isEdgeModeOff = prefs.getBoolean(KEY_EDGE_OFF, false)
+        isChromaDenoiseOn = prefs.getBoolean(KEY_CHROMA_DENOISE, false)
 
         val pointsStr = prefs.getString(KEY_POINTS, null)
         if (pointsStr != null) {
@@ -55,6 +57,7 @@ class AppSettings(private val context: Context) {
         editor.putBoolean(KEY_SPORTS_MODE, isSportsMode)
         editor.putBoolean(KEY_NR_OFF, isNoiseReductionOff)
         editor.putBoolean(KEY_EDGE_OFF, isEdgeModeOff)
+        editor.putBoolean(KEY_CHROMA_DENOISE, isChromaDenoiseOn)
 
         if (currentPoints.size == 4) {
             val sb = StringBuilder()
@@ -78,5 +81,6 @@ class AppSettings(private val context: Context) {
         private const val KEY_SPORTS_MODE = "sports_mode"
         private const val KEY_NR_OFF = "nr_off"
         private const val KEY_EDGE_OFF = "edge_off"
+        private const val KEY_CHROMA_DENOISE = "chroma_denoise_on"
     }
 }

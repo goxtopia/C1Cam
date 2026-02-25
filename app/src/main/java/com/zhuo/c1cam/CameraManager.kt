@@ -113,7 +113,9 @@ class CameraManager(
                 }
 
                 override fun onCaptureSuccess(image: ImageProxy) {
-                    imageProcessor.processAndSaveImage(image, points, viewW, viewH, ratio, lut)
+                    imageProcessor.processAndSaveImage(
+                        image, points, viewW, viewH, ratio, lut, appSettings.isChromaDenoiseOn
+                    )
                     activity.runOnUiThread {
                         Toast.makeText(activity, "Saved to Gallery", Toast.LENGTH_SHORT).show()
                     }

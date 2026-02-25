@@ -204,8 +204,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showAdvancedSettingsDialog() {
-        val options = arrayOf("Sports Mode", "Disable Noise Reduction", "Disable Edge Sharpening")
-        val checkedItems = booleanArrayOf(appSettings.isSportsMode, appSettings.isNoiseReductionOff, appSettings.isEdgeModeOff)
+        val options = arrayOf("Sports Mode", "Disable Noise Reduction", "Disable Edge Sharpening", "Chroma Noise Reduction")
+        val checkedItems = booleanArrayOf(appSettings.isSportsMode, appSettings.isNoiseReductionOff, appSettings.isEdgeModeOff, appSettings.isChromaDenoiseOn)
 
         MaterialAlertDialogBuilder(this)
             .setTitle("Advanced Settings")
@@ -214,6 +214,7 @@ class MainActivity : AppCompatActivity() {
                     0 -> appSettings.isSportsMode = isChecked
                     1 -> appSettings.isNoiseReductionOff = isChecked
                     2 -> appSettings.isEdgeModeOff = isChecked
+                    3 -> appSettings.isChromaDenoiseOn = isChecked
                 }
             }
             .setPositiveButton("OK") { _, _ ->
