@@ -1,24 +1,37 @@
 package com.zhuo.c1cam
 
 import android.Manifest
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.LinearGradient
+import android.graphics.Paint
+import android.graphics.Shader
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.view.LayoutInflater
 import android.view.View
+import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.ImageView
+import android.widget.ListView
+import android.widget.ProgressBar
+import android.widget.TextView
 import android.widget.Toast
 import android.widget.ToggleButton
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.drawable.toBitmap
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.slider.Slider
+import java.util.concurrent.Executors
 
 class MainActivity : AppCompatActivity() {
 
@@ -45,6 +58,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var imageProcessor: ImageProcessor
     private lateinit var cameraManager: CameraManager
     
+    @Volatile
     private var currentLut: Lut3D? = null
 
     private val activityResultLauncher =
@@ -177,7 +191,7 @@ class MainActivity : AppCompatActivity() {
     private fun showSettingsMenu() {
         val options = arrayOf("Target Aspect Ratio", "Select LUT", "Advanced Settings")
 
-        AlertDialog.Builder(this)
+        MaterialAlertDialogBuilder(this)
             .setTitle("Settings")
             .setItems(options) { _, which ->
                 when (which) {
@@ -193,7 +207,7 @@ class MainActivity : AppCompatActivity() {
         val options = arrayOf("Sports Mode", "Disable Noise Reduction", "Disable Edge Sharpening")
         val checkedItems = booleanArrayOf(appSettings.isSportsMode, appSettings.isNoiseReductionOff, appSettings.isEdgeModeOff)
 
-        AlertDialog.Builder(this)
+        MaterialAlertDialogBuilder(this)
             .setTitle("Advanced Settings")
             .setMultiChoiceItems(options, checkedItems) { _, which, isChecked ->
                 when (which) {
@@ -216,7 +230,7 @@ class MainActivity : AppCompatActivity() {
         val options = arrayOf("Original", "A4 (1.414)", "Letter (1.294)", "4:3 (1.333)", "16:9 (1.778)")
         val values = floatArrayOf(0f, 1.414f, 1.294f, 1.333f, 1.778f)
 
-        AlertDialog.Builder(this)
+        MaterialAlertDialogBuilder(this)
             .setTitle("Select Target Aspect Ratio")
             .setItems(options) { _, which ->
                 appSettings.targetAspectRatio = values[which]
@@ -227,31 +241,165 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showLutDialog() {
-        val lutFiles = mutableListOf<String>()
-        lutFiles.add("None")
+        val lutFiles = loadAvailableLutFiles()
+
+        val originalLutName = appSettings.lutName
+        val originalLut = currentLut
+
+        var selectedLutName = originalLutName
+        var selectedLut = currentLut
+        val lutCache = mutableMapOf<String, Lut3D?>()
+        originalLutName?.let { lutCache[it] = originalLut }
+
+        val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_lut_preview, null)
+        val previewImage = dialogView.findViewById<ImageView>(R.id.lut_preview_image)
+        val previewName = dialogView.findViewById<TextView>(R.id.lut_preview_name)
+        val previewProgress = dialogView.findViewById<ProgressBar>(R.id.lut_preview_progress)
+        val lutList = dialogView.findViewById<ListView>(R.id.lut_list)
+
+        val adapter = ArrayAdapter(this, R.layout.item_lut_option, android.R.id.text1, lutFiles)
+        lutList.adapter = adapter
+        lutList.choiceMode = ListView.CHOICE_MODE_SINGLE
+
+        val initialLabel = selectedLutName ?: LUT_NONE_LABEL
+        val initialIndex = lutFiles.indexOf(initialLabel).takeIf { it >= 0 } ?: 0
+        lutList.setItemChecked(initialIndex, true)
+
+        val previewBaseBitmap = captureCurrentPreviewBitmap()
+        val previewExecutor = Executors.newSingleThreadExecutor()
+        var previewRequestId = 0
+        var committed = false
+        var dialogClosed = false
+
+        fun renderPreview(name: String?, lut: Lut3D?) {
+            previewName.text = if (name != null) "Current: $name" else "Current: None (Original)"
+            previewProgress.visibility = View.VISIBLE
+            val requestId = ++previewRequestId
+
+            previewExecutor.execute {
+                val rendered = try {
+                    lut?.let { LutUtils.applyLut(previewBaseBitmap, it) } ?: previewBaseBitmap
+                } catch (e: Exception) {
+                    Log.e(TAG, "LUT dialog preview render failed", e)
+                    previewBaseBitmap
+                }
+
+                runOnUiThread {
+                    if (dialogClosed || requestId != previewRequestId) return@runOnUiThread
+                    previewImage.setImageBitmap(rendered)
+                    previewProgress.visibility = View.GONE
+                }
+            }
+        }
+
+        fun applyTemporarySelection(index: Int) {
+            val previousName = selectedLutName
+            val previousLut = selectedLut
+            val label = lutFiles[index]
+
+            if (label == LUT_NONE_LABEL) {
+                selectedLutName = null
+                selectedLut = null
+            } else {
+                val loaded = lutCache.getOrPut(label) { LutUtils.loadLut(this, label) }
+                if (loaded == null) {
+                    Toast.makeText(this, "Failed to load LUT: $label", Toast.LENGTH_SHORT).show()
+                    val fallbackLabel = previousName ?: LUT_NONE_LABEL
+                    val fallbackIndex = lutFiles.indexOf(fallbackLabel).takeIf { it >= 0 } ?: 0
+                    lutList.setItemChecked(fallbackIndex, true)
+                    selectedLutName = previousName
+                    selectedLut = previousLut
+                    return
+                }
+                selectedLutName = label
+                selectedLut = loaded
+            }
+
+            // Apply instantly so the camera preview updates in real time.
+            currentLut = selectedLut
+            renderPreview(selectedLutName, selectedLut)
+        }
+
+        lutList.setOnItemClickListener { _, _, position, _ ->
+            applyTemporarySelection(position)
+        }
+
+        renderPreview(selectedLutName, selectedLut)
+
+        val dialog = MaterialAlertDialogBuilder(this)
+            .setTitle("Select LUT")
+            .setView(dialogView)
+            .setPositiveButton("Apply") { _, _ ->
+                committed = true
+                appSettings.lutName = selectedLutName
+                currentLut = selectedLut
+                appSettings.save(overlay.getNormalizedPoints())
+                val message = if (selectedLutName == null) {
+                    "LUT cleared"
+                } else {
+                    "LUT applied: $selectedLutName"
+                }
+                Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Cancel", null)
+            .create()
+
+        dialog.setOnDismissListener {
+            dialogClosed = true
+            previewExecutor.shutdownNow()
+            if (!committed) {
+                appSettings.lutName = originalLutName
+                currentLut = originalLut
+            }
+        }
+
+        dialog.show()
+    }
+
+    private fun loadAvailableLutFiles(): List<String> {
+        val lutFiles = mutableListOf(LUT_NONE_LABEL)
         try {
             val files = assets.list("luts")
-            files?.filter { it.endsWith(".cube", ignoreCase = true) }?.forEach { lutFiles.add(it) }
+            files
+                ?.filter { it.endsWith(".cube", ignoreCase = true) }
+                ?.sorted()
+                ?.forEach { lutFiles.add(it) }
         } catch (e: Exception) {
             Log.e(TAG, "Error listing assets", e)
         }
+        return lutFiles
+    }
 
-        AlertDialog.Builder(this)
-            .setTitle("Select LUT")
-            .setItems(lutFiles.toTypedArray()) { _, which ->
-                val selected = lutFiles[which]
-                if (selected == "None") {
-                    appSettings.lutName = null
-                    currentLut = null
-                    Toast.makeText(this, "LUT cleared", Toast.LENGTH_SHORT).show()
-                } else {
-                    appSettings.lutName = selected
-                    currentLut = LutUtils.loadLut(this, selected)
-                    Toast.makeText(this, "LUT loaded: $selected", Toast.LENGTH_SHORT).show()
-                }
-                appSettings.save(overlay.getNormalizedPoints())
-            }
-            .show()
+    private fun captureCurrentPreviewBitmap(): Bitmap {
+        val drawable = previewRectified.drawable
+        if (drawable != null) {
+            val targetW = drawable.intrinsicWidth.takeIf { it > 0 } ?: 480
+            val targetH = drawable.intrinsicHeight.takeIf { it > 0 } ?: 640
+            return drawable.toBitmap(targetW, targetH, Bitmap.Config.ARGB_8888)
+        }
+
+        val fallbackW = previewRectified.width.takeIf { it > 0 } ?: 480
+        val fallbackH = previewRectified.height.takeIf { it > 0 } ?: 640
+        return createFallbackPreviewBitmap(fallbackW, fallbackH)
+    }
+
+    private fun createFallbackPreviewBitmap(width: Int, height: Int): Bitmap {
+        val safeW = width.coerceAtLeast(1)
+        val safeH = height.coerceAtLeast(1)
+        val bitmap = Bitmap.createBitmap(safeW, safeH, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        paint.shader = LinearGradient(
+            0f,
+            0f,
+            safeW.toFloat(),
+            safeH.toFloat(),
+            intArrayOf(Color.parseColor("#455A64"), Color.parseColor("#1C2833"), Color.parseColor("#0B0F14")),
+            floatArrayOf(0f, 0.55f, 1f),
+            Shader.TileMode.CLAMP
+        )
+        canvas.drawRect(0f, 0f, safeW.toFloat(), safeH.toFloat(), paint)
+        return bitmap
     }
 
     private fun requestPermissions() {
@@ -410,6 +558,7 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "C1Cam"
+        private const val LUT_NONE_LABEL = "None"
         private val REQUIRED_PERMISSIONS = mutableListOf(Manifest.permission.CAMERA).apply {
             if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
                 add(Manifest.permission.WRITE_EXTERNAL_STORAGE)

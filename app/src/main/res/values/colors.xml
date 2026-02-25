@@ -2,4 +2,13 @@
 <resources>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+    <color name="cam_bg_start">#111620</color>
+    <color name="cam_bg_end">#05070B</color>
+    <color name="cam_panel_bg">#CC1A222B</color>
+    <color name="cam_panel_bg_soft">#A61A222B</color>
+    <color name="cam_panel_stroke">#4DFFFFFF</color>
+    <color name="cam_accent">#7FE8C9</color>
+    <color name="cam_accent_soft">#66A6FFE8</color>
+    <color name="cam_text_primary">#F5F8FF</color>
+    <color name="cam_text_secondary">#B8C5D8</color>
 </resources>
