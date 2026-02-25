@@ -97,6 +97,8 @@ object ChromaNoiseReduction {
         val width = image.width
         val height = image.height
 
+        Log.d(TAG, "Starting Chroma NR. Image: ${width}x${height} format=${image.format}")
+
         val eglEnv = EglEnvironment(width, height)
         var bitmap: Bitmap? = null
 
@@ -112,9 +114,21 @@ object ChromaNoiseReduction {
             GLES20.glUseProgram(program)
 
             // Prepare buffers (Y, U, V)
-            val yBuffer = extractPlane(image.planes[0], width, height)
-            val uBuffer = extractPlane(image.planes[1], width / 2, height / 2)
-            val vBuffer = extractPlane(image.planes[2], width / 2, height / 2)
+            // Log plane details
+            for (i in 0 until image.planes.size) {
+                val p = image.planes[i]
+                Log.d(TAG, "Plane $i: rowStride=${p.rowStride} pixelStride=${p.pixelStride} remaining=${p.buffer.remaining()}")
+            }
+
+            val yBuffer = extractPlane(image.planes[0], width, height, "Y")
+            val uBuffer = extractPlane(image.planes[1], width / 2, height / 2, "U")
+            val vBuffer = extractPlane(image.planes[2], width / 2, height / 2, "V")
+
+            // IMPORTANT: Unpack alignment. Default is 4. If width/2 is odd (e.g. 540 is ok, 960 is ok, but some resolutions might not be)
+            // But also, we are uploading byte arrays.
+            // Row length of our packed buffer is 'width' bytes (or width/2).
+            // If that length is not a multiple of 4, we must set alignment to 1.
+            GLES20.glPixelStorei(GLES20.GL_UNPACK_ALIGNMENT, 1)
 
             val texY = uploadTexture(yBuffer, width, height, 0)
             val texU = uploadTexture(uBuffer, width / 2, height / 2, 1)
@@ -203,49 +217,80 @@ object ChromaNoiseReduction {
         return bitmap ?: image.toBitmap()
     }
 
-    private fun extractPlane(plane: ImageProxy.PlaneProxy, width: Int, height: Int): ByteBuffer {
+    private fun extractPlane(plane: ImageProxy.PlaneProxy, width: Int, height: Int, name: String): ByteBuffer {
         val buffer = plane.buffer
         val rowStride = plane.rowStride
         val pixelStride = plane.pixelStride
 
+        Log.d(TAG, "extractPlane $name: w=$width h=$height rowStride=$rowStride pixelStride=$pixelStride")
+
         // Output buffer (tightly packed)
         val output = ByteBuffer.allocateDirect(width * height)
 
-        // Remember initial position
         val startPos = buffer.position()
 
-        // Read row by row
+        // Debug first byte
+        if (buffer.remaining() > 0) {
+            val firstByte = buffer.get(startPos)
+            Log.d(TAG, "$name[0] = $firstByte")
+        } else {
+            Log.e(TAG, "$name buffer is empty!")
+        }
+
         val rowBuffer = ByteArray(rowStride)
 
         for (y in 0 until height) {
-            // Move to start of the row
-            // Note: rowStride includes padding
-            // Start reading from (startPos + y * rowStride)
-            // But verify buffer limits
-            buffer.position(startPos + y * rowStride)
+            val offset = startPos + y * rowStride
+            if (offset >= buffer.limit()) {
+                Log.e(TAG, "Buffer overflow at row $y. offset=$offset limit=${buffer.limit()}")
+                break
+            }
+
+            buffer.position(offset)
 
             if (pixelStride == 1) {
-                // Contiguous pixels in this row
-                // Just read 'width' bytes
-                buffer.get(rowBuffer, 0, width)
-                output.put(rowBuffer, 0, width)
+                // If width == rowStride, we could optimize, but rowStride usually has padding
+                // Read 'width' bytes
+                // Verify we don't read past limit
+                val remaining = buffer.remaining()
+                if (remaining < width) {
+                    Log.w(TAG, "Row $y: Not enough bytes. Needed $width, has $remaining")
+                    buffer.get(rowBuffer, 0, remaining)
+                    output.put(rowBuffer, 0, remaining)
+                } else {
+                    buffer.get(rowBuffer, 0, width)
+                    output.put(rowBuffer, 0, width)
+                }
             } else {
-                // Strided pixels (e.g. U/V interleaved)
-                // We need to read enough bytes to cover 'width' pixels
-                // The last pixel is at index (width - 1) * pixelStride
-                // Total bytes to read for this row = (width - 1) * pixelStride + 1
-                // But we can just read rowStride bytes (or remaining) and pick what we need
-                val bytesToRead = kotlin.math.min(rowStride, buffer.remaining())
+                // Determine how many bytes we need to read to get 'width' pixels
+                // Last pixel is at index (width - 1) * pixelStride
+                // So we need to read up to that byte
+                val neededBytes = (width - 1) * pixelStride + 1
+                val remaining = buffer.remaining()
+
+                // We should read min(rowStride, remaining) but also at least neededBytes if possible
+                // Actually we just read what's available up to rowStride
+                val bytesToRead = kotlin.math.min(rowStride, remaining)
+
+                if (bytesToRead < neededBytes) {
+                    Log.w(TAG, "Row $y: Warning, might be partial. Needed $neededBytes, read $bytesToRead")
+                }
+
                 buffer.get(rowBuffer, 0, bytesToRead)
 
                 for (x in 0 until width) {
-                    output.put(rowBuffer[x * pixelStride])
+                    val idx = x * pixelStride
+                    if (idx < bytesToRead) {
+                        output.put(rowBuffer[idx])
+                    } else {
+                        // Pad with 128 (0.5) if missing? Or just 0
+                        output.put(128.toByte())
+                    }
                 }
             }
         }
 
         output.position(0)
-        // Restore buffer position
         buffer.position(startPos)
 
         return output
