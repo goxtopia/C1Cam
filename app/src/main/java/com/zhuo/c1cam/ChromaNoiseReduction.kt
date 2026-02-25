@@ -37,14 +37,16 @@ object ChromaNoiseReduction {
         uniform float sigmaRange;
         uniform int radius;
 
-        // Convert YUV to RGB (BT.601)
+        // Convert YUV to RGB (BT.601 Full Range)
+        // Y: [0, 1]
+        // U, V: [0, 1] (internally 0..255 mapped to 0..1)
+        // Center of U/V is 0.5
         vec3 yuv2rgb(float y, float u, float v) {
-            y = 1.164 * (y - 16.0/255.0);
-            u -= 128.0/255.0;
-            v -= 128.0/255.0;
-            float r = y + 1.596 * v;
-            float g = y - 0.391 * u - 0.813 * v;
-            float b = y + 2.018 * u;
+            u -= 0.5;
+            v -= 0.5;
+            float r = y + 1.402 * v;
+            float g = y - 0.344136 * u - 0.714136 * v;
+            float b = y + 1.772 * u;
             return clamp(vec3(r, g, b), 0.0, 1.0);
         }
 
@@ -110,7 +112,6 @@ object ChromaNoiseReduction {
             GLES20.glUseProgram(program)
 
             // Prepare buffers (Y, U, V)
-            // Handle padding and pixel stride by copying to dense buffers
             val yBuffer = extractPlane(image.planes[0], width, height)
             val uBuffer = extractPlane(image.planes[1], width / 2, height / 2)
             val vBuffer = extractPlane(image.planes[2], width / 2, height / 2)
@@ -207,47 +208,46 @@ object ChromaNoiseReduction {
         val rowStride = plane.rowStride
         val pixelStride = plane.pixelStride
 
-        // If tightly packed, just return the buffer (if pixelStride is 1)
-        if (pixelStride == 1 && rowStride == width) {
-            // Need to rewind just in case
-            buffer.rewind()
-            // Make a copy to be safe regarding native memory lifecycle or if we need direct byte buffer for GL
-            val copy = ByteBuffer.allocateDirect(width * height)
-            copy.put(buffer)
-            copy.position(0)
-            return copy
-        }
-
-        // Manual copy to remove stride/padding
+        // Output buffer (tightly packed)
         val output = ByteBuffer.allocateDirect(width * height)
-        buffer.rewind()
 
+        // Remember initial position
+        val startPos = buffer.position()
+
+        // Read row by row
         val rowBuffer = ByteArray(rowStride)
+
         for (y in 0 until height) {
-            // Position buffer at start of row
-            buffer.position(y * rowStride)
-            // Read row
-            // Careful: last row might not have full stride padding
-            val length = if (pixelStride == 1) width else width * pixelStride
-            buffer.get(rowBuffer, 0, kotlin.math.min(rowStride, buffer.remaining()))
+            // Move to start of the row
+            // Note: rowStride includes padding
+            // Start reading from (startPos + y * rowStride)
+            // But verify buffer limits
+            buffer.position(startPos + y * rowStride)
 
             if (pixelStride == 1) {
+                // Contiguous pixels in this row
+                // Just read 'width' bytes
+                buffer.get(rowBuffer, 0, width)
                 output.put(rowBuffer, 0, width)
             } else {
-                // De-interleave if needed (e.g. NV21 U plane has V interleaved)
-                // However, for U plane we only want every 'pixelStride' byte starting at 0
-                // For V plane, same logic.
-                // Wait, ImageProxy gives us separate planes for U and V even for NV21,
-                // BUT pixelStride will be 2. The data for U is at offset 0, 2, 4...
-                // The data for V is at offset 1, 3, 5... (relative to its own plane start, or shared buffer).
-                // Actually, CameraX abstracts this.
-                // If pixelStride is 2, we just take every 2nd byte.
+                // Strided pixels (e.g. U/V interleaved)
+                // We need to read enough bytes to cover 'width' pixels
+                // The last pixel is at index (width - 1) * pixelStride
+                // Total bytes to read for this row = (width - 1) * pixelStride + 1
+                // But we can just read rowStride bytes (or remaining) and pick what we need
+                val bytesToRead = kotlin.math.min(rowStride, buffer.remaining())
+                buffer.get(rowBuffer, 0, bytesToRead)
+
                 for (x in 0 until width) {
                     output.put(rowBuffer[x * pixelStride])
                 }
             }
         }
+
         output.position(0)
+        // Restore buffer position
+        buffer.position(startPos)
+
         return output
     }
 
