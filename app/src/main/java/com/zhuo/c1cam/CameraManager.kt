@@ -1,5 +1,6 @@
 package com.zhuo.c1cam
 
+import android.graphics.ImageFormat
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CaptureRequest
 import android.util.Log
@@ -49,7 +50,9 @@ class CameraManager(
                 it.setSurfaceProvider(viewFinder.surfaceProvider)
             }
 
-            imageCapture = ImageCapture.Builder().build()
+            imageCapture = ImageCapture.Builder()
+                .setBufferFormat(ImageFormat.YUV_420_888)
+                .build()
 
             imageAnalysis = ImageAnalysis.Builder()
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
