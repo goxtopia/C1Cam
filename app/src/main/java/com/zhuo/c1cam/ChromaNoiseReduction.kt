@@ -54,8 +54,7 @@ object ChromaNoiseReduction {
             vec2 texSize = vec2(width, height);
             vec2 texelSize = 1.0 / texSize;
 
-            // Read from Alpha channel (GL_ALPHA texture)
-            float centerY = texture2D(texY, vTexCoord).a;
+            float centerY = texture2D(texY, vTexCoord).r;
 
             float sumU = 0.0;
             float sumV = 0.0;
@@ -66,9 +65,9 @@ object ChromaNoiseReduction {
                     vec2 offset = vec2(float(x), float(y)) * texelSize;
                     vec2 neighborCoord = vTexCoord + offset;
 
-                    float neighborY = texture2D(texY, neighborCoord).a;
-                    float neighborU = texture2D(texU, neighborCoord).a;
-                    float neighborV = texture2D(texV, neighborCoord).a;
+                    float neighborY = texture2D(texY, neighborCoord).r;
+                    float neighborU = texture2D(texU, neighborCoord).r;
+                    float neighborV = texture2D(texV, neighborCoord).r;
 
                     float distSq = float(x*x + y*y);
                     float rangeDiff = abs(neighborY - centerY);
@@ -126,8 +125,10 @@ object ChromaNoiseReduction {
             val uBuffer = extractPlane(image.planes[1], width / 2, height / 2, "U")
             val vBuffer = extractPlane(image.planes[2], width / 2, height / 2, "V")
 
-            // IMPORTANT: Unpack alignment. Default is 4.
-            // We set it inside uploadTexture to be safe, but also here globally.
+            // IMPORTANT: Unpack alignment. Default is 4. If width/2 is odd (e.g. 540 is ok, 960 is ok, but some resolutions might not be)
+            // But also, we are uploading byte arrays.
+            // Row length of our packed buffer is 'width' bytes (or width/2).
+            // If that length is not a multiple of 4, we must set alignment to 1.
             GLES20.glPixelStorei(GLES20.GL_UNPACK_ALIGNMENT, 1)
             checkGlError("glPixelStorei")
 
@@ -341,9 +342,7 @@ object ChromaNoiseReduction {
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
 
-        // Use GL_ALPHA instead of GL_LUMINANCE for better compatibility
-        GLES20.glPixelStorei(GLES20.GL_UNPACK_ALIGNMENT, 1)
-        GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_ALPHA, width, height, 0, GLES20.GL_ALPHA, GLES20.GL_UNSIGNED_BYTE, buffer)
+        GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_LUMINANCE, width, height, 0, GLES20.GL_LUMINANCE, GLES20.GL_UNSIGNED_BYTE, buffer)
         checkGlError("glTexImage2D unit $unit")
 
         return textureIds[0]
