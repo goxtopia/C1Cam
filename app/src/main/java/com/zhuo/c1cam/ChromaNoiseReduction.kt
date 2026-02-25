@@ -112,6 +112,7 @@ object ChromaNoiseReduction {
             }
 
             GLES20.glUseProgram(program)
+            checkGlError("glUseProgram")
 
             // Prepare buffers (Y, U, V)
             // Log plane details
@@ -129,6 +130,7 @@ object ChromaNoiseReduction {
             // Row length of our packed buffer is 'width' bytes (or width/2).
             // If that length is not a multiple of 4, we must set alignment to 1.
             GLES20.glPixelStorei(GLES20.GL_UNPACK_ALIGNMENT, 1)
+            checkGlError("glPixelStorei")
 
             val texY = uploadTexture(yBuffer, width, height, 0)
             val texU = uploadTexture(uBuffer, width / 2, height / 2, 1)
@@ -137,6 +139,7 @@ object ChromaNoiseReduction {
             // Set Uniforms
             val posHandle = GLES20.glGetAttribLocation(program, "aPosition")
             val texHandle = GLES20.glGetAttribLocation(program, "aTexCoord")
+            checkGlError("glGetAttribLocation")
 
             val vertexData = floatArrayOf(
                 -1f, -1f, 0f, 0f,
@@ -152,10 +155,12 @@ object ChromaNoiseReduction {
 
             GLES20.glVertexAttribPointer(posHandle, 2, GLES20.GL_FLOAT, false, 4 * 4, vertexBuffer)
             GLES20.glEnableVertexAttribArray(posHandle)
+            checkGlError("glVertexAttribPointer pos")
 
             vertexBuffer.position(2)
             GLES20.glVertexAttribPointer(texHandle, 2, GLES20.GL_FLOAT, false, 4 * 4, vertexBuffer)
             GLES20.glEnableVertexAttribArray(texHandle)
+            checkGlError("glVertexAttribPointer tex")
 
             GLES20.glUniform1i(GLES20.glGetUniformLocation(program, "texY"), 0)
             GLES20.glUniform1i(GLES20.glGetUniformLocation(program, "texU"), 1)
@@ -166,12 +171,14 @@ object ChromaNoiseReduction {
             GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "sigmaSpatial"), 3.0f)
             GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "sigmaRange"), 0.1f) // Normalized range [0, 1]
             GLES20.glUniform1i(GLES20.glGetUniformLocation(program, "radius"), 3)
+            checkGlError("glUniforms")
 
             // Setup FBO
             val fboIds = IntArray(1)
             GLES20.glGenFramebuffers(1, fboIds, 0)
             val fboId = fboIds[0]
             GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fboId)
+            checkGlError("glBindFramebuffer")
 
             val texIds = IntArray(1)
             GLES20.glGenTextures(1, texIds, 0)
@@ -182,19 +189,23 @@ object ChromaNoiseReduction {
             GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
             GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
             GLES20.glFramebufferTexture2D(GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0, GLES20.GL_TEXTURE_2D, outputTexId, 0)
+            checkGlError("glFramebufferTexture2D")
 
-            if (GLES20.glCheckFramebufferStatus(GLES20.GL_FRAMEBUFFER) != GLES20.GL_FRAMEBUFFER_COMPLETE) {
-                Log.e(TAG, "Framebuffer not complete")
+            val status = GLES20.glCheckFramebufferStatus(GLES20.GL_FRAMEBUFFER)
+            if (status != GLES20.GL_FRAMEBUFFER_COMPLETE) {
+                Log.e(TAG, "Framebuffer not complete: $status")
             }
 
             GLES20.glViewport(0, 0, width, height)
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
             GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+            checkGlError("glDrawArrays")
 
             // Read pixels
             val buffer = ByteBuffer.allocateDirect(width * height * 4)
             buffer.order(ByteOrder.nativeOrder())
             GLES20.glReadPixels(0, 0, width, height, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buffer)
+            checkGlError("glReadPixels")
 
             bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
             bitmap.copyPixelsFromBuffer(buffer)
@@ -225,14 +236,24 @@ object ChromaNoiseReduction {
         Log.d(TAG, "extractPlane $name: w=$width h=$height rowStride=$rowStride pixelStride=$pixelStride")
 
         // Output buffer (tightly packed)
+        // CRITICAL: Use Native Order for GL compatibility
         val output = ByteBuffer.allocateDirect(width * height)
+        output.order(ByteOrder.nativeOrder())
+
+        // Fill with 128 (gray) as default to prevent 0s (green tint) if read fails
+        // This acts as a 'fallback' color for unread pixels
+        if (name == "U" || name == "V") {
+            for (i in 0 until output.capacity()) {
+                output.put(i, 128.toByte())
+            }
+        }
 
         val startPos = buffer.position()
 
         // Debug first byte
         if (buffer.remaining() > 0) {
             val firstByte = buffer.get(startPos)
-            Log.d(TAG, "$name[0] = $firstByte")
+            Log.d(TAG, "$name[0] from src = $firstByte")
         } else {
             Log.e(TAG, "$name buffer is empty!")
         }
@@ -249,9 +270,6 @@ object ChromaNoiseReduction {
             buffer.position(offset)
 
             if (pixelStride == 1) {
-                // If width == rowStride, we could optimize, but rowStride usually has padding
-                // Read 'width' bytes
-                // Verify we don't read past limit
                 val remaining = buffer.remaining()
                 if (remaining < width) {
                     Log.w(TAG, "Row $y: Not enough bytes. Needed $width, has $remaining")
@@ -262,14 +280,8 @@ object ChromaNoiseReduction {
                     output.put(rowBuffer, 0, width)
                 }
             } else {
-                // Determine how many bytes we need to read to get 'width' pixels
-                // Last pixel is at index (width - 1) * pixelStride
-                // So we need to read up to that byte
                 val neededBytes = (width - 1) * pixelStride + 1
                 val remaining = buffer.remaining()
-
-                // We should read min(rowStride, remaining) but also at least neededBytes if possible
-                // Actually we just read what's available up to rowStride
                 val bytesToRead = kotlin.math.min(rowStride, remaining)
 
                 if (bytesToRead < neededBytes) {
@@ -282,16 +294,20 @@ object ChromaNoiseReduction {
                     val idx = x * pixelStride
                     if (idx < bytesToRead) {
                         output.put(rowBuffer[idx])
-                    } else {
-                        // Pad with 128 (0.5) if missing? Or just 0
-                        output.put(128.toByte())
                     }
+                    // No else needed, default is 128
                 }
             }
         }
 
         output.position(0)
         buffer.position(startPos)
+
+        // Debug output first byte
+        if (output.remaining() > 0) {
+            Log.d(TAG, "$name[0] in out = ${output.get(0)}")
+        }
+        output.position(0)
 
         return output
     }
@@ -301,6 +317,7 @@ object ChromaNoiseReduction {
         GLES20.glGenTextures(1, textureIds, 0)
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0 + unit)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureIds[0])
+        checkGlError("glBindTexture unit $unit")
 
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
@@ -308,8 +325,17 @@ object ChromaNoiseReduction {
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
 
         GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_LUMINANCE, width, height, 0, GLES20.GL_LUMINANCE, GLES20.GL_UNSIGNED_BYTE, buffer)
+        checkGlError("glTexImage2D unit $unit")
 
         return textureIds[0]
+    }
+
+    private fun checkGlError(op: String) {
+        var error: Int
+        while (GLES20.glGetError().also { error = it } != GLES20.GL_NO_ERROR) {
+            Log.e(TAG, "$op: glError $error")
+            throw RuntimeException("$op: glError $error")
+        }
     }
 
     private fun createProgram(vertexSource: String, fragmentSource: String): Int {
