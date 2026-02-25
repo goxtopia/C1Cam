@@ -98,15 +98,23 @@ object LutUtils {
                     continue
                 }
 
-                if (line.startsWith("LUT_3D_SIZE")) {
+                val upperLine = line.uppercase()
+
+                if (upperLine.startsWith("LUT_3D_SIZE")) {
                     val parts = line.split("\\s+".toRegex())
                     if (parts.size >= 2) {
-                        size = parts[1].toInt()
+                         try {
+                             size = parts[1].toInt()
+                         } catch (e: Exception) {
+                             // ignore malformed size line
+                         }
                     }
-                } else if (line.startsWith("TITLE") || line.startsWith("DOMAIN_")) {
-                    // ignore title/domain keywords
+                } else if (upperLine.startsWith("TITLE") || upperLine.startsWith("DOMAIN_") || upperLine.startsWith("LUT_1D_SIZE")) {
+                    // ignore title/domain/1D size keywords
                 } else {
                     // Data lines
+                    // Check if line looks like data (starts with digit or minus)
+                    // Some headers might be unknown, if we can't parse 3 floats, skip it.
                     val parts = line.split("\\s+".toRegex())
                     if (parts.size >= 3) {
                         try {
@@ -117,7 +125,7 @@ object LutUtils {
                             dataList.add(g)
                             dataList.add(b)
                         } catch (e: NumberFormatException) {
-                            // ignore
+                            // Not a data line, ignore
                         }
                     }
                 }

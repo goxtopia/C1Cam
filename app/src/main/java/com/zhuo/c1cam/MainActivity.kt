@@ -192,7 +192,7 @@ class MainActivity : AppCompatActivity() {
         lutFiles.add("None")
         try {
             val files = assets.list("luts")
-            files?.filter { it.endsWith(".cube") }?.forEach { lutFiles.add(it) }
+            files?.filter { it.endsWith(".cube", ignoreCase = true) }?.forEach { lutFiles.add(it) }
         } catch (e: Exception) {
             Log.e(TAG, "Error listing assets", e)
         }
