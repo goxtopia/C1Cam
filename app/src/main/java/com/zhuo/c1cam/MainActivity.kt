@@ -256,8 +256,8 @@ class MainActivity : AppCompatActivity() {
         val normalizedPoints = overlay.getNormalizedPoints()
         val mappedPoints = mapPointsToImage(normalizedPoints, uprightBitmap.width, uprightBitmap.height, viewW, viewH)
 
-        // Rectify
-        val rectifiedBitmap = RectificationUtils.rectifyBitmap(uprightBitmap, mappedPoints, targetAspectRatio)
+        // Rectify (Full resolution for capture)
+        val rectifiedBitmap = RectificationUtils.rectifyBitmap(uprightBitmap, mappedPoints, targetAspectRatio, maxDimension = 0)
 
         // Apply LUT if active
         val finalBitmap = currentLut?.let {
@@ -369,7 +369,8 @@ class MainActivity : AppCompatActivity() {
 
                 if (points.size == 4 && viewW > 0 && viewH > 0) {
                     val mappedPoints = mapPointsToImage(points, rotatedBitmap.width, rotatedBitmap.height, viewW, viewH)
-                    val rectified = RectificationUtils.rectifyBitmap(rotatedBitmap, mappedPoints, targetAspectRatio)
+                    // Rectify with downscaling for preview performance (e.g. 512px max)
+                    val rectified = RectificationUtils.rectifyBitmap(rotatedBitmap, mappedPoints, targetAspectRatio, maxDimension = 512)
 
                     val finalPreview = currentLut?.let {
                         LutUtils.applyLut(rectified, it)

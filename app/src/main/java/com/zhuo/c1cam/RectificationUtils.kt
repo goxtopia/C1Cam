@@ -10,7 +10,7 @@ import kotlin.math.max
 
 object RectificationUtils {
 
-    fun rectifyBitmap(sourceBitmap: Bitmap, normalizedPoints: List<PointF>, targetAspectRatio: Float): Bitmap {
+    fun rectifyBitmap(sourceBitmap: Bitmap, normalizedPoints: List<PointF>, targetAspectRatio: Float, maxDimension: Int = 0): Bitmap {
         if (normalizedPoints.size != 4) return sourceBitmap
 
         val w = sourceBitmap.width.toFloat()
@@ -65,8 +65,15 @@ object RectificationUtils {
             dstWidth = dstHeight * finalAspectRatio
         }
 
-        val dstW = dstWidth.toInt().coerceAtLeast(1)
-        val dstH = dstHeight.toInt().coerceAtLeast(1)
+        var dstW = dstWidth.toInt().coerceAtLeast(1)
+        var dstH = dstHeight.toInt().coerceAtLeast(1)
+
+        // Scale down if maxDimension is set
+        if (maxDimension > 0 && (dstW > maxDimension || dstH > maxDimension)) {
+            val scale = maxDimension.toFloat() / max(dstW, dstH)
+            dstW = (dstW * scale).toInt().coerceAtLeast(1)
+            dstH = (dstH * scale).toInt().coerceAtLeast(1)
+        }
 
         // Destination points (Rectangle at 0,0)
         val dstPoints = floatArrayOf(

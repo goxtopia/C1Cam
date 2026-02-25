@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import java.io.BufferedReader
 import java.io.InputStreamReader
+import java.util.stream.IntStream
 import kotlin.math.floor
 import kotlin.math.roundToInt
 
@@ -140,14 +141,19 @@ object LutUtils {
         bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
 
         val newPixels = IntArray(width * height)
-        val tempRgb = IntArray(3)
 
-        for (i in pixels.indices) {
+        // Parallel processing for performance ("matrix calculation" equivalent via SIMD/Threading)
+        IntStream.range(0, pixels.size).parallel().forEach { i ->
             val pixel = pixels[i]
             val r = (pixel shr 16 and 0xFF) / 255f
             val g = (pixel shr 8 and 0xFF) / 255f
             val b = (pixel and 0xFF) / 255f
 
+            // Thread-local result array to avoid allocation?
+            // Actually, declaring a small array inside is fine for HotSpot/ART escape analysis,
+            // or we can just return values.
+            // But Lut3D.lookup takes an array.
+            val tempRgb = IntArray(3)
             lut.lookup(r, g, b, tempRgb)
 
             newPixels[i] = (0xFF shl 24) or (tempRgb[0] shl 16) or (tempRgb[1] shl 8) or tempRgb[2]
