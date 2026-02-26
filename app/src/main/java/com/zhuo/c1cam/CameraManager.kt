@@ -2,6 +2,7 @@ package com.zhuo.c1cam
 
 import android.graphics.ImageFormat
 import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraMetadata
 import android.hardware.camera2.CaptureRequest
 import android.util.Log
 import android.widget.ImageView
@@ -169,7 +170,35 @@ class CameraManager(
             optionsBuilder.setCaptureRequestOption(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_FAST)
         }
 
+        if (appSettings.isWdrMode) {
+            // CONTROL_TONEMAP_MODE_CONTRAST_CURVE = 0
+            optionsBuilder.setCaptureRequestOption(CaptureRequest.TONEMAP_MODE, 0)
+            optionsBuilder.setCaptureRequestOption(CaptureRequest.TONEMAP_CURVE, createWdrCurve())
+        } else {
+            // CONTROL_TONEMAP_MODE_FAST = 1
+            optionsBuilder.setCaptureRequestOption(CaptureRequest.TONEMAP_MODE, 1)
+        }
+
         cameraControl.addCaptureRequestOptions(optionsBuilder.build())
+    }
+
+    private fun createWdrCurve(): android.hardware.camera2.params.TonemapCurve {
+        val size = 64
+        val curve = FloatArray(size * 2)
+        for (i in 0 until size) {
+            val inVal = i.toFloat() / (size - 1)
+            // WDR Curve: Lift shadows. Standard sRGB is approx x^(1/2.2) = x^0.45
+            // WDR we want to preserve more shadow detail, so effectively a lower gamma power?
+            // Actually, linear raw -> output.
+            // If we use standard gamma 2.2, out = in^(1/2.2).
+            // To lift shadows more, we need a smaller exponent, e.g. 1/3.0 = 0.33.
+            // Or use a custom log-like curve.
+            // Let's use x^0.35
+            val outVal = Math.pow(inVal.toDouble(), 0.35).toFloat().coerceIn(0f, 1f)
+            curve[i * 2] = inVal
+            curve[i * 2 + 1] = outVal
+        }
+        return android.hardware.camera2.params.TonemapCurve(curve, curve, curve)
     }
 
     fun setExposureCompensation(evValue: Float) {

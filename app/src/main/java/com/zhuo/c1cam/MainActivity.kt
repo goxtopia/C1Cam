@@ -233,8 +233,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showAdvancedSettingsDialog() {
-        val options = arrayOf("Sports Mode", "Disable Noise Reduction", "Disable Edge Sharpening", "Chroma Noise Reduction", "Disable Crop Mode")
-        val checkedItems = booleanArrayOf(appSettings.isSportsMode, appSettings.isNoiseReductionOff, appSettings.isEdgeModeOff, appSettings.isChromaDenoiseOn, appSettings.isCropModeOff)
+        val options = arrayOf("Sports Mode", "Disable Noise Reduction", "Disable Edge Sharpening", "Chroma Noise Reduction", "Disable Crop Mode", "WDR Mode")
+        val checkedItems = booleanArrayOf(appSettings.isSportsMode, appSettings.isNoiseReductionOff, appSettings.isEdgeModeOff, appSettings.isChromaDenoiseOn, appSettings.isCropModeOff, appSettings.isWdrMode)
 
         MaterialAlertDialogBuilder(this)
             .setTitle("Advanced Settings")
@@ -245,6 +245,7 @@ class MainActivity : AppCompatActivity() {
                     2 -> appSettings.isEdgeModeOff = isChecked
                     3 -> appSettings.isChromaDenoiseOn = isChecked
                     4 -> appSettings.isCropModeOff = isChecked
+                    5 -> appSettings.isWdrMode = isChecked
                 }
             }
             .setPositiveButton("OK") { _, _ ->
@@ -259,16 +260,65 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showAspectRatioDialog() {
-        val options = arrayOf("Original", "A4 (1.414)", "Letter (1.294)", "4:3 (1.333)", "16:9 (1.778)")
-        val values = floatArrayOf(0f, 1.414f, 1.294f, 1.333f, 1.778f)
+        val options = arrayOf("Original", "A4 (1.414)", "Letter (1.294)", "4:3 (1.333)", "16:9 (1.778)", "Custom...")
+        val values = floatArrayOf(0f, 1.414f, 1.294f, 1.333f, 1.778f, -1f)
 
         MaterialAlertDialogBuilder(this)
             .setTitle("Select Target Aspect Ratio")
             .setItems(options) { _, which ->
-                appSettings.targetAspectRatio = values[which]
-                Toast.makeText(this, "Aspect Ratio set to ${options[which]}", Toast.LENGTH_SHORT).show()
-                appSettings.save(overlay.getNormalizedPoints())
+                if (values[which] == -1f) {
+                    showCustomAspectRatioDialog()
+                } else {
+                    appSettings.targetAspectRatio = values[which]
+                    Toast.makeText(this, "Aspect Ratio set to ${options[which]}", Toast.LENGTH_SHORT).show()
+                    appSettings.save(overlay.getNormalizedPoints())
+                }
             }
+            .show()
+    }
+
+    private fun showCustomAspectRatioDialog() {
+        val context = this
+        val layout = android.widget.LinearLayout(context)
+        layout.orientation = android.widget.LinearLayout.VERTICAL
+        val padding = (16 * resources.displayMetrics.density).toInt()
+        layout.setPadding(padding, padding, padding, padding)
+
+        val widthInput = android.widget.EditText(context)
+        widthInput.hint = "Width"
+        widthInput.inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+
+        val heightInput = android.widget.EditText(context)
+        heightInput.hint = "Height"
+        heightInput.inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+
+        layout.addView(widthInput)
+        layout.addView(heightInput)
+
+        MaterialAlertDialogBuilder(context)
+            .setTitle("Custom Aspect Ratio")
+            .setView(layout)
+            .setPositiveButton("OK") { _, _ ->
+                val wStr = widthInput.text.toString()
+                val hStr = heightInput.text.toString()
+                if (wStr.isNotEmpty() && hStr.isNotEmpty()) {
+                    try {
+                        val w = wStr.toFloat()
+                        val h = hStr.toFloat()
+                        if (w > 0 && h > 0) {
+                            val ratio = w / h
+                            appSettings.targetAspectRatio = ratio
+                            Toast.makeText(context, "Custom Ratio set to $ratio", Toast.LENGTH_SHORT).show()
+                            appSettings.save(overlay.getNormalizedPoints())
+                        } else {
+                            Toast.makeText(context, "Invalid dimensions", Toast.LENGTH_SHORT).show()
+                        }
+                    } catch (e: NumberFormatException) {
+                        Toast.makeText(context, "Invalid number format", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+            .setNegativeButton("Cancel", null)
             .show()
     }
 

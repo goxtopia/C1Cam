@@ -17,6 +17,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
 import kotlin.math.floor
+import kotlin.math.pow
 import kotlin.math.roundToInt
 
 class Lut3D(val size: Int, val data: FloatArray) {

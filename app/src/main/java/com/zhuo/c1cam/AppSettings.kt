@@ -16,6 +16,7 @@ class AppSettings(private val context: Context) {
     var isEdgeModeOff = false
     var isChromaDenoiseOn = false
     var isCropModeOff = false
+    var isWdrMode = false
     var focalLength: Int = 24
     var savedPoints: List<PointF>? = null
 
@@ -33,6 +34,7 @@ class AppSettings(private val context: Context) {
         isEdgeModeOff = prefs.getBoolean(KEY_EDGE_OFF, false)
         isChromaDenoiseOn = prefs.getBoolean(KEY_CHROMA_DENOISE, false)
         isCropModeOff = prefs.getBoolean(KEY_CROP_MODE_OFF, false)
+        isWdrMode = prefs.getBoolean(KEY_WDR_MODE, false)
         focalLength = prefs.getInt(KEY_FOCAL_LENGTH, 24)
 
         val pointsStr = prefs.getString(KEY_POINTS, null)
@@ -63,6 +65,7 @@ class AppSettings(private val context: Context) {
         editor.putBoolean(KEY_EDGE_OFF, isEdgeModeOff)
         editor.putBoolean(KEY_CHROMA_DENOISE, isChromaDenoiseOn)
         editor.putBoolean(KEY_CROP_MODE_OFF, isCropModeOff)
+        editor.putBoolean(KEY_WDR_MODE, isWdrMode)
         editor.putInt(KEY_FOCAL_LENGTH, focalLength)
 
         if (currentPoints.size == 4) {
@@ -89,6 +92,7 @@ class AppSettings(private val context: Context) {
         private const val KEY_EDGE_OFF = "edge_off"
         private const val KEY_CHROMA_DENOISE = "chroma_denoise_on"
         private const val KEY_CROP_MODE_OFF = "crop_mode_off"
+        private const val KEY_WDR_MODE = "wdr_mode"
         private const val KEY_FOCAL_LENGTH = "focal_length"
     }
 }
