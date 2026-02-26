@@ -3,7 +3,9 @@ package com.zhuo.c1cam
 import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Matrix
+import android.graphics.Paint
 import android.graphics.PointF
 import android.os.Build
 import android.provider.MediaStore
@@ -15,6 +17,19 @@ import java.util.Locale
 import kotlin.math.max
 
 class ImageProcessor(private val context: Context) {
+
+    // Reusable bitmaps for preview to reduce GC pressure
+    private var reusedUprightBitmap: Bitmap? = null
+    private var reusedRectifiedBitmap: Bitmap? = null
+    private var reusedScaledBitmap: Bitmap? = null
+
+    // Ping-pong buffer for output to UI thread to prevent tearing/crashes
+    private val outputBitmaps = arrayOfNulls<Bitmap>(2)
+    private var outputIndex = 0
+
+    // Cached objects
+    private val matrix = Matrix()
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { isFilterBitmap = true }
 
     fun processAndSaveImage(
         imageProxy: ImageProxy,
@@ -45,9 +60,9 @@ class ImageProcessor(private val context: Context) {
 
         // Rotate to upright
         val uprightBitmap = if (rotationDegrees != 0) {
-            val matrix = Matrix()
-            matrix.postRotate(rotationDegrees.toFloat())
-            Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+            val m = Matrix()
+            m.postRotate(rotationDegrees.toFloat())
+            Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, m, true)
         } else {
             bitmap
         }
@@ -61,7 +76,7 @@ class ImageProcessor(private val context: Context) {
             // Map points
             val mappedPoints = mapPointsToImage(normalizedViewPoints, uprightBitmap.width, uprightBitmap.height, viewW, viewH)
 
-            // Rectify (Full resolution for capture)
+            // Rectify (Full resolution for capture - creating new bitmaps is acceptable here for quality/simplicity)
             val rectifiedBitmap = RectificationUtils.rectifyBitmap(uprightBitmap, mappedPoints, targetAspectRatio, maxDimension = 0)
 
             // Apply LUT if active
@@ -85,46 +100,105 @@ class ImageProcessor(private val context: Context) {
         focalLength: Int
     ): Bitmap {
         val rotationDegrees = imageProxy.imageInfo.rotationDegrees
+        // This allocation is hard to avoid without custom YUV converter
         val bitmap = imageProxy.toBitmap()
 
-        // Rotate to upright
-        val uprightBitmap = if (rotationDegrees != 0) {
-            val matrix = Matrix()
-            matrix.postRotate(rotationDegrees.toFloat())
-            Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
-        } else {
-            bitmap
+        // 1. Rotate to upright
+        val w = bitmap.width
+        val h = bitmap.height
+        val uprightW = if (rotationDegrees == 90 || rotationDegrees == 270) h else w
+        val uprightH = if (rotationDegrees == 90 || rotationDegrees == 270) w else h
+
+        if (reusedUprightBitmap == null || reusedUprightBitmap!!.width != uprightW || reusedUprightBitmap!!.height != uprightH) {
+            reusedUprightBitmap = Bitmap.createBitmap(uprightW, uprightH, Bitmap.Config.ARGB_8888)
         }
+        val uprightBmp = reusedUprightBitmap!!
+
+        matrix.reset()
+        if (rotationDegrees != 0) {
+            matrix.postRotate(rotationDegrees.toFloat())
+            if (rotationDegrees == 90) matrix.postTranslate(h.toFloat(), 0f)
+            else if (rotationDegrees == 180) matrix.postTranslate(w.toFloat(), h.toFloat())
+            else if (rotationDegrees == 270) matrix.postTranslate(0f, w.toFloat())
+        }
+
+        val canvasUpright = Canvas(uprightBmp)
+        canvasUpright.drawBitmap(bitmap, matrix, paint)
+
+        // Intermediate bitmap that holds the image before final output (LUT or copy)
+        val intermediateBitmap: Bitmap
 
         if (isCropModeOff) {
-            // Digital Zoom Crop
-            val croppedBitmap = cropForFocalLength(uprightBitmap, focalLength)
+            // Digital Zoom Crop & Scale
+            // 2. Crop logic (focal length)
+            val cropRect = getCropRectForFocalLength(uprightBmp.width, uprightBmp.height, focalLength)
 
-            // Scale down for preview performance
+            // 3. Scale down logic
             val maxDim = 512
-            val w = croppedBitmap.width
-            val h = croppedBitmap.height
-            val scale = if (max(w, h) > maxDim) maxDim.toFloat() / max(w, h).toFloat() else 1f
+            val scale = if (max(cropRect.width(), cropRect.height()) > maxDim) {
+                maxDim.toFloat() / max(cropRect.width(), cropRect.height())
+            } else 1f
 
-            val scaledBitmap = if (scale < 1f) {
-                Bitmap.createScaledBitmap(croppedBitmap, (w * scale).toInt(), (h * scale).toInt(), true)
-            } else {
-                croppedBitmap
+            val scaledW = (cropRect.width() * scale).toInt().coerceAtLeast(1)
+            val scaledH = (cropRect.height() * scale).toInt().coerceAtLeast(1)
+
+            if (reusedScaledBitmap == null || reusedScaledBitmap!!.width != scaledW || reusedScaledBitmap!!.height != scaledH) {
+                reusedScaledBitmap = Bitmap.createBitmap(scaledW, scaledH, Bitmap.Config.ARGB_8888)
             }
+            val scaledBmp = reusedScaledBitmap!!
 
-            return currentLut?.let {
-                LutUtils.applyLut(scaledBitmap, it)
-            } ?: scaledBitmap
+            // Draw Crop+Scale
+            val canvasScaled = Canvas(scaledBmp)
+            val srcRect = android.graphics.Rect(cropRect.left.toInt(), cropRect.top.toInt(), cropRect.right.toInt(), cropRect.bottom.toInt())
+            val dstRect = android.graphics.Rect(0, 0, scaledW, scaledH)
+            canvasScaled.drawBitmap(uprightBmp, srcRect, dstRect, paint)
+
+            intermediateBitmap = scaledBmp
+
         } else {
             // Map points and rectify
-            val mappedPoints = mapPointsToImage(normalizedViewPoints, uprightBitmap.width, uprightBitmap.height, viewW, viewH)
-            val rectifiedBitmap = RectificationUtils.rectifyBitmap(uprightBitmap, mappedPoints, targetAspectRatio, maxDimension = 512)
+            val mappedPoints = mapPointsToImage(normalizedViewPoints, uprightBmp.width, uprightBmp.height, viewW, viewH)
 
-            // Apply LUT if active
-            return currentLut?.let {
-                LutUtils.applyLut(rectifiedBitmap, it)
-            } ?: rectifiedBitmap
+            // Calculate target dimensions
+            val dims = RectificationUtils.getRectifiedDimensions(uprightBmp, mappedPoints, targetAspectRatio, maxDimension = 512)
+            val dstW = dims[0]
+            val dstH = dims[1]
+
+            if (reusedRectifiedBitmap == null || reusedRectifiedBitmap!!.width != dstW || reusedRectifiedBitmap!!.height != dstH) {
+                reusedRectifiedBitmap = Bitmap.createBitmap(dstW, dstH, Bitmap.Config.ARGB_8888)
+            }
+            val rectBmp = reusedRectifiedBitmap!!
+
+            // Rectify
+            RectificationUtils.rectifyToBitmap(uprightBmp, rectBmp, mappedPoints)
+
+            intermediateBitmap = rectBmp
         }
+
+        // Prepare Output Bitmap (Ping-Pong)
+        val outW = intermediateBitmap.width
+        val outH = intermediateBitmap.height
+
+        if (outputBitmaps[outputIndex] == null || outputBitmaps[outputIndex]!!.width != outW || outputBitmaps[outputIndex]!!.height != outH) {
+            outputBitmaps[outputIndex] = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888)
+        }
+        val outputBmp = outputBitmaps[outputIndex]!!
+
+        // Apply LUT or Copy to Output
+        if (currentLut != null) {
+            LutUtils.applyLut(intermediateBitmap, currentLut, outputBmp)
+        } else {
+            // Just copy
+            val c = Canvas(outputBmp)
+            c.drawBitmap(intermediateBitmap, 0f, 0f, paint)
+        }
+
+        val result = outputBmp
+
+        // Advance index for next frame
+        outputIndex = (outputIndex + 1) % 2
+
+        return result
     }
 
     private fun mapPointsToImage(
@@ -164,12 +238,18 @@ class ImageProcessor(private val context: Context) {
 
     private fun cropForFocalLength(bitmap: Bitmap, focalLength: Int): Bitmap {
         if (focalLength <= 24) return bitmap
+        val cropRect = getCropRectForFocalLength(bitmap.width, bitmap.height, focalLength)
+        return Bitmap.createBitmap(bitmap, cropRect.left.toInt(), cropRect.top.toInt(), cropRect.width().toInt(), cropRect.height().toInt())
+    }
+
+    private fun getCropRectForFocalLength(w: Int, h: Int, focalLength: Int): android.graphics.RectF {
+        if (focalLength <= 24) return android.graphics.RectF(0f, 0f, w.toFloat(), h.toFloat())
         val scale = focalLength / 24.0f
-        val w = (bitmap.width / scale).toInt()
-        val h = (bitmap.height / scale).toInt()
-        val x = (bitmap.width - w) / 2
-        val y = (bitmap.height - h) / 2
-        return Bitmap.createBitmap(bitmap, x, y, w, h)
+        val newW = w / scale
+        val newH = h / scale
+        val x = (w - newW) / 2
+        val y = (h - newH) / 2
+        return android.graphics.RectF(x, y, x + newW, y + newH)
     }
 
     private fun saveBitmapToGallery(bitmap: Bitmap) {
@@ -191,9 +271,6 @@ class ImageProcessor(private val context: Context) {
                 if (outputStream != null) {
                     bitmap.compress(Bitmap.CompressFormat.JPEG, 100, outputStream)
                     outputStream.close()
-                    // If you have a ViewModel or callback to show toasts properly, you can use that instead.
-                    // For now, doing Toast in processor runs on context's main thread handling wrapper (or requires UI thread)
-                    // We can rely on a callback later if needed, but Context.mainLooper usually handles Toast fine.
                 }
             } catch (e: Exception) {
                 Log.e("ImageProcessor", "Error saving image", e)
