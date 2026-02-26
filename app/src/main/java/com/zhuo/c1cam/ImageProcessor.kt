@@ -31,6 +31,22 @@ class ImageProcessor(private val context: Context) {
     private val matrix = Matrix()
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { isFilterBitmap = true }
 
+    private val identityLut by lazy {
+        val size = 2
+        val data = FloatArray(size * size * size * 3)
+        var idx = 0
+        for (b in 0 until size) {
+            for (g in 0 until size) {
+                for (r in 0 until size) {
+                    data[idx++] = r.toFloat() / (size - 1)
+                    data[idx++] = g.toFloat() / (size - 1)
+                    data[idx++] = b.toFloat() / (size - 1)
+                }
+            }
+        }
+        Lut3D(size, data)
+    }
+
     fun processAndSaveImage(
         imageProxy: ImageProxy,
         normalizedViewPoints: List<PointF>,
@@ -40,6 +56,7 @@ class ImageProcessor(private val context: Context) {
         currentLut: Lut3D?,
         isChromaDenoiseOn: Boolean,
         isCropModeOff: Boolean,
+        isWdrMode: Boolean,
         focalLength: Int
     ) {
         val rotationDegrees = imageProxy.imageInfo.rotationDegrees
@@ -70,8 +87,8 @@ class ImageProcessor(private val context: Context) {
         val finalBitmap = if (isCropModeOff) {
             val croppedBitmap = cropForFocalLength(uprightBitmap, focalLength)
             currentLut?.let {
-                LutUtils.applyLut(croppedBitmap, it)
-            } ?: croppedBitmap
+                LutUtils.applyLut(croppedBitmap, it, isWdrMode)
+            } ?: (if (isWdrMode) LutUtils.applyLut(croppedBitmap, identityLut, isWdrMode) else croppedBitmap)
         } else {
             // Map points
             val mappedPoints = mapPointsToImage(normalizedViewPoints, uprightBitmap.width, uprightBitmap.height, viewW, viewH)
@@ -81,8 +98,8 @@ class ImageProcessor(private val context: Context) {
 
             // Apply LUT if active
             currentLut?.let {
-                LutUtils.applyLut(rectifiedBitmap, it)
-            } ?: rectifiedBitmap
+                LutUtils.applyLut(rectifiedBitmap, it, isWdrMode)
+            } ?: (if (isWdrMode) LutUtils.applyLut(rectifiedBitmap, identityLut, isWdrMode) else rectifiedBitmap)
         }
 
         // Save
@@ -97,6 +114,7 @@ class ImageProcessor(private val context: Context) {
         targetAspectRatio: Float,
         currentLut: Lut3D?,
         isCropModeOff: Boolean,
+        isWdrMode: Boolean,
         focalLength: Int
     ): Bitmap {
         val rotationDegrees = imageProxy.imageInfo.rotationDegrees
@@ -186,7 +204,10 @@ class ImageProcessor(private val context: Context) {
 
         // Apply LUT or Copy to Output
         if (currentLut != null) {
-            LutUtils.applyLut(intermediateBitmap, currentLut, outputBmp)
+            LutUtils.applyLut(intermediateBitmap, currentLut, isWdrMode, outputBmp)
+        } else if (isWdrMode) {
+            // Apply WDR using Identity LUT
+            LutUtils.applyLut(intermediateBitmap, identityLut, isWdrMode, outputBmp)
         } else {
             // Just copy
             val c = Canvas(outputBmp)

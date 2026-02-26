@@ -68,7 +68,7 @@ class CameraManager(
 
                 if (points.size == 4 && viewW > 0 && viewH > 0) {
                     val finalPreview = imageProcessor.processForPreview(
-                        imageProxy, points, viewW, viewH, appSettings.targetAspectRatio, lutProvider(), appSettings.isCropModeOff, appSettings.focalLength
+                        imageProxy, points, viewW, viewH, appSettings.targetAspectRatio, lutProvider(), appSettings.isCropModeOff, appSettings.isWdrMode, appSettings.focalLength
                     )
 
                     activity.runOnUiThread {
@@ -120,7 +120,7 @@ class CameraManager(
 
                 override fun onCaptureSuccess(image: ImageProxy) {
                     imageProcessor.processAndSaveImage(
-                        image, points, viewW, viewH, ratio, lut, appSettings.isChromaDenoiseOn, appSettings.isCropModeOff, appSettings.focalLength
+                        image, points, viewW, viewH, ratio, lut, appSettings.isChromaDenoiseOn, appSettings.isCropModeOff, appSettings.isWdrMode, appSettings.focalLength
                     )
                     activity.runOnUiThread {
                         Toast.makeText(activity, "Saved to Gallery", Toast.LENGTH_SHORT).show()
