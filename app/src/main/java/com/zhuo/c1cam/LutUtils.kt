@@ -155,22 +155,22 @@ object LutUtils {
         return null
     }
 
-    fun applyLut(bitmap: Bitmap, lut: Lut3D, isWdrEnabled: Boolean = false, destBitmap: Bitmap? = null): Bitmap {
+    fun applyLut(bitmap: Bitmap, lut: Lut3D, destBitmap: Bitmap? = null): Bitmap {
         val source = if (bitmap.config == Bitmap.Config.ARGB_8888) bitmap else bitmap.copy(Bitmap.Config.ARGB_8888, false)
 
         if (!glDisabled) {
             try {
-                return glRenderer.applyLut(source, lut, isWdrEnabled, destBitmap)
+                return glRenderer.applyLut(source, lut, destBitmap)
             } catch (e: Exception) {
                 glDisabled = true
                 Log.w(TAG, "OpenGL ES LUT failed, fallback to CPU", e)
             }
         }
 
-        return applyLutCpu(source, lut, isWdrEnabled, destBitmap)
+        return applyLutCpu(source, lut, destBitmap)
     }
 
-    private fun applyLutCpu(bitmap: Bitmap, lut: Lut3D, isWdrEnabled: Boolean, destBitmap: Bitmap?): Bitmap {
+    private fun applyLutCpu(bitmap: Bitmap, lut: Lut3D, destBitmap: Bitmap?): Bitmap {
         val width = bitmap.width
         val height = bitmap.height
         val pixels = IntArray(width * height)
@@ -182,16 +182,9 @@ object LutUtils {
         // Optimization: Use direct array access if possible, or just standard loop
         for (i in pixels.indices) {
             val pixel = pixels[i]
-            var r = (pixel shr 16 and 0xFF) / 255f
-            var g = (pixel shr 8 and 0xFF) / 255f
-            var b = (pixel and 0xFF) / 255f
-
-            if (isWdrEnabled) {
-                // WDR: lift shadows
-                r = Math.pow(r.toDouble(), 0.75).toFloat()
-                g = Math.pow(g.toDouble(), 0.75).toFloat()
-                b = Math.pow(b.toDouble(), 0.75).toFloat()
-            }
+            val r = (pixel shr 16 and 0xFF) / 255f
+            val g = (pixel shr 8 and 0xFF) / 255f
+            val b = (pixel and 0xFF) / 255f
 
             lut.lookup(r, g, b, tempRgb)
 
@@ -217,7 +210,6 @@ object LutUtils {
         private var inputTexLoc = -1
         private var lutTexLoc = -1
         private var lutSizeLoc = -1
-        private var wdrEnabledLoc = -1
 
         private var inputTexId = 0
         private var outputTexId = 0
@@ -246,7 +238,7 @@ object LutUtils {
             }
 
         @Synchronized
-        fun applyLut(bitmap: Bitmap, lut: Lut3D, isWdrEnabled: Boolean, destBitmap: Bitmap?): Bitmap {
+        fun applyLut(bitmap: Bitmap, lut: Lut3D, destBitmap: Bitmap?): Bitmap {
             ensureEgl()
             makeCurrent()
             ensureProgram()
@@ -318,7 +310,6 @@ object LutUtils {
             GLES30.glBindTexture(GLES30.GL_TEXTURE_3D, lutTexId)
             GLES30.glUniform1i(lutTexLoc, 1)
             GLES30.glUniform1f(lutSizeLoc, lut.size.toFloat())
-            GLES30.glUniform1i(wdrEnabledLoc, if (isWdrEnabled) 1 else 0)
 
             drawFullScreenQuad()
             checkGlError("draw")
@@ -469,7 +460,6 @@ object LutUtils {
             inputTexLoc = GLES30.glGetUniformLocation(program, "uInputTex")
             lutTexLoc = GLES30.glGetUniformLocation(program, "uLutTex")
             lutSizeLoc = GLES30.glGetUniformLocation(program, "uLutSize")
-            wdrEnabledLoc = GLES30.glGetUniformLocation(program, "uWdrEnabled")
         }
 
         private fun compileShader(type: Int, source: String): Int {
@@ -613,25 +603,12 @@ object LutUtils {
                 uniform sampler2D uInputTex;
                 uniform sampler3D uLutTex;
                 uniform float uLutSize;
-                uniform int uWdrEnabled;
                 out vec4 fragColor;
-
-                vec3 wdr(vec3 c) {
-                    // Lift shadows
-                    return pow(c, vec3(0.75));
-                }
-
                 void main() {
                     vec2 inputUv = vec2(vTexCoord.x, vTexCoord.y);
                     vec4 src = texture(uInputTex, inputUv);
-
-                    vec3 rgb = src.rgb;
-                    if (uWdrEnabled == 1) {
-                        rgb = wdr(rgb);
-                    }
-
                     float edge = 1.0 / uLutSize;
-                    vec3 coord = clamp(rgb, 0.0, 1.0) * (1.0 - edge) + 0.5 * edge;
+                    vec3 coord = clamp(src.rgb, 0.0, 1.0) * (1.0 - edge) + 0.5 * edge;
                     vec3 graded = texture(uLutTex, coord).rgb;
                     fragColor = vec4(graded, src.a);
                 }
