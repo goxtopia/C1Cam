@@ -54,7 +54,10 @@ class CameraManager(
                 .setBufferFormat(ImageFormat.YUV_420_888)
                 .build()
 
+            // Optimized: Set target resolution to reduce processing load for preview analysis
+            // 720p is sufficient for the on-screen preview overlay
             imageAnalysis = ImageAnalysis.Builder()
+                .setTargetResolution(android.util.Size(1280, 720))
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .build()
 

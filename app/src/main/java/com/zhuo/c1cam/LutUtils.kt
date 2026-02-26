@@ -127,8 +127,6 @@ object LutUtils {
                     // ignore title/domain/1D size keywords
                 } else {
                     // Data lines
-                    // Check if line looks like data (starts with digit or minus)
-                    // Some headers might be unknown, if we can't parse 3 floats, skip it.
                     val parts = line.split("\\s+".toRegex())
                     if (parts.size >= 3) {
                         try {
@@ -156,22 +154,22 @@ object LutUtils {
         return null
     }
 
-    fun applyLut(bitmap: Bitmap, lut: Lut3D): Bitmap {
+    fun applyLut(bitmap: Bitmap, lut: Lut3D, destBitmap: Bitmap? = null): Bitmap {
         val source = if (bitmap.config == Bitmap.Config.ARGB_8888) bitmap else bitmap.copy(Bitmap.Config.ARGB_8888, false)
 
         if (!glDisabled) {
             try {
-                return glRenderer.applyLut(source, lut)
+                return glRenderer.applyLut(source, lut, destBitmap)
             } catch (e: Exception) {
                 glDisabled = true
                 Log.w(TAG, "OpenGL ES LUT failed, fallback to CPU", e)
             }
         }
 
-        return applyLutCpu(source, lut)
+        return applyLutCpu(source, lut, destBitmap)
     }
 
-    private fun applyLutCpu(bitmap: Bitmap, lut: Lut3D): Bitmap {
+    private fun applyLutCpu(bitmap: Bitmap, lut: Lut3D, destBitmap: Bitmap?): Bitmap {
         val width = bitmap.width
         val height = bitmap.height
         val pixels = IntArray(width * height)
@@ -180,6 +178,7 @@ object LutUtils {
         val newPixels = IntArray(width * height)
         val tempRgb = IntArray(3)
 
+        // Optimization: Use direct array access if possible, or just standard loop
         for (i in pixels.indices) {
             val pixel = pixels[i]
             val r = (pixel shr 16 and 0xFF) / 255f
@@ -189,6 +188,11 @@ object LutUtils {
             lut.lookup(r, g, b, tempRgb)
 
             newPixels[i] = (0xFF shl 24) or (tempRgb[0] shl 16) or (tempRgb[1] shl 8) or tempRgb[2]
+        }
+
+        if (destBitmap != null && destBitmap.width == width && destBitmap.height == height) {
+            destBitmap.setPixels(newPixels, 0, width, 0, 0, width, height)
+            return destBitmap
         }
 
         return Bitmap.createBitmap(newPixels, width, height, bitmap.config)
@@ -206,8 +210,22 @@ object LutUtils {
         private var lutTexLoc = -1
         private var lutSizeLoc = -1
 
+        private var inputTexId = 0
+        private var outputTexId = 0
         private var lutTexId = 0
+        private var fboId = 0
+
+        // Cache texture dimensions to detect changes
+        private var cachedInputW = 0
+        private var cachedInputH = 0
+        private var cachedOutputW = 0
+        private var cachedOutputH = 0
+
         private var boundLut: Lut3D? = null
+
+        // Reusable buffer for reading pixels
+        private var cachedReadBuffer: ByteBuffer? = null
+        private var cachedReadBufferCapacity = 0
 
         private val quadBuffer: FloatBuffer = ByteBuffer
             .allocateDirect(QUAD_VERTICES.size * 4)
@@ -219,68 +237,126 @@ object LutUtils {
             }
 
         @Synchronized
-        fun applyLut(bitmap: Bitmap, lut: Lut3D): Bitmap {
+        fun applyLut(bitmap: Bitmap, lut: Lut3D, destBitmap: Bitmap?): Bitmap {
             ensureEgl()
             makeCurrent()
             ensureProgram()
+
+            // Check if we need to re-create textures due to size change
+            if (bitmap.width != cachedInputW || bitmap.height != cachedInputH) {
+                releaseInputTexture()
+            }
+            if (bitmap.width != cachedOutputW || bitmap.height != cachedOutputH) {
+                releaseOutputTexture()
+            }
+
+            if (inputTexId == 0) {
+                inputTexId = createTexture()
+                cachedInputW = bitmap.width
+                cachedInputH = bitmap.height
+            }
+
+            // Upload bitmap to input texture
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, inputTexId)
+            GLUtils.texImage2D(GLES30.GL_TEXTURE_2D, 0, bitmap, 0)
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+
+            if (outputTexId == 0) {
+                outputTexId = createTexture()
+                // Allocate storage for output texture
+                GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, outputTexId)
+                GLES30.glTexImage2D(
+                    GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA,
+                    bitmap.width, bitmap.height, 0,
+                    GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, null
+                )
+                GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+                cachedOutputW = bitmap.width
+                cachedOutputH = bitmap.height
+            }
+
+            if (fboId == 0) {
+                val framebuffers = IntArray(1)
+                GLES30.glGenFramebuffers(1, framebuffers, 0)
+                fboId = framebuffers[0]
+            }
+
+            // Bind FBO and attach output texture
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, fboId)
+            GLES30.glFramebufferTexture2D(
+                GLES30.GL_FRAMEBUFFER,
+                GLES30.GL_COLOR_ATTACHMENT0,
+                GLES30.GL_TEXTURE_2D,
+                outputTexId,
+                0
+            )
+
+            val status = GLES30.glCheckFramebufferStatus(GLES30.GL_FRAMEBUFFER)
+            if (status != GLES30.GL_FRAMEBUFFER_COMPLETE) {
+                throw IllegalStateException("Framebuffer incomplete: 0x${Integer.toHexString(status)}")
+            }
+
             uploadLutIfNeeded(lut)
 
-            val textures = IntArray(2)
-            val framebuffers = IntArray(1)
-            try {
-                val inputTexId = createInputTexture(bitmap)
-                textures[0] = inputTexId
+            GLES30.glViewport(0, 0, bitmap.width, bitmap.height)
+            GLES30.glUseProgram(program)
 
-                val outTexId = createOutputTexture(bitmap.width, bitmap.height)
-                textures[1] = outTexId
+            GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, inputTexId)
+            GLES30.glUniform1i(inputTexLoc, 0)
 
-                GLES30.glGenFramebuffers(1, framebuffers, 0)
-                checkGlError("glGenFramebuffers")
-                val fbo = framebuffers[0]
-                GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, fbo)
-                GLES30.glFramebufferTexture2D(
-                    GLES30.GL_FRAMEBUFFER,
-                    GLES30.GL_COLOR_ATTACHMENT0,
-                    GLES30.GL_TEXTURE_2D,
-                    outTexId,
-                    0
-                )
-                val status = GLES30.glCheckFramebufferStatus(GLES30.GL_FRAMEBUFFER)
-                if (status != GLES30.GL_FRAMEBUFFER_COMPLETE) {
-                    throw IllegalStateException("Framebuffer incomplete: 0x${Integer.toHexString(status)}")
-                }
+            GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_3D, lutTexId)
+            GLES30.glUniform1i(lutTexLoc, 1)
+            GLES30.glUniform1f(lutSizeLoc, lut.size.toFloat())
 
-                GLES30.glViewport(0, 0, bitmap.width, bitmap.height)
-                GLES30.glUseProgram(program)
+            drawFullScreenQuad()
+            checkGlError("draw")
 
-                GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
-                GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, inputTexId)
-                GLES30.glUniform1i(inputTexLoc, 0)
+            val result = readPixelsToBitmap(bitmap.width, bitmap.height, destBitmap)
 
-                GLES30.glActiveTexture(GLES30.GL_TEXTURE1)
-                GLES30.glBindTexture(GLES30.GL_TEXTURE_3D, lutTexId)
-                GLES30.glUniform1i(lutTexLoc, 1)
-                GLES30.glUniform1f(lutSizeLoc, lut.size.toFloat())
+            // Cleanup binding
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_3D, 0)
+            GLES30.glUseProgram(0)
 
-                drawFullScreenQuad()
-                checkGlError("draw")
+            // Release current context to allow other threads to use EGL if needed
+            releaseCurrent()
 
-                val result = readBitmapFromFramebuffer(bitmap.width, bitmap.height)
+            return result
+        }
 
-                GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
-                GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
-                GLES30.glBindTexture(GLES30.GL_TEXTURE_3D, 0)
-                GLES30.glUseProgram(0)
-                return result
-            } finally {
-                if (framebuffers[0] != 0) {
-                    GLES30.glDeleteFramebuffers(1, framebuffers, 0)
-                }
-                if (textures[0] != 0 || textures[1] != 0) {
-                    GLES30.glDeleteTextures(2, textures, 0)
-                }
-                releaseCurrent()
+        private fun releaseInputTexture() {
+            if (inputTexId != 0) {
+                GLES30.glDeleteTextures(1, intArrayOf(inputTexId), 0)
+                inputTexId = 0
             }
+            cachedInputW = 0
+            cachedInputH = 0
+        }
+
+        private fun releaseOutputTexture() {
+            if (outputTexId != 0) {
+                GLES30.glDeleteTextures(1, intArrayOf(outputTexId), 0)
+                outputTexId = 0
+            }
+            cachedOutputW = 0
+            cachedOutputH = 0
+        }
+
+        private fun createTexture(): Int {
+            val ids = IntArray(1)
+            GLES30.glGenTextures(1, ids, 0)
+            checkGlError("glGenTextures")
+            val texId = ids[0]
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, texId)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+            return texId
         }
 
         private fun ensureEgl() {
@@ -447,48 +523,6 @@ object LutUtils {
             boundLut = lut
         }
 
-        private fun createInputTexture(bitmap: Bitmap): Int {
-            val ids = IntArray(1)
-            GLES30.glGenTextures(1, ids, 0)
-            checkGlError("glGenTextures input")
-            val texId = ids[0]
-            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, texId)
-            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
-            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
-            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
-            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
-            GLUtils.texImage2D(GLES30.GL_TEXTURE_2D, 0, bitmap, 0)
-            checkGlError("texImage2D input")
-            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
-            return texId
-        }
-
-        private fun createOutputTexture(width: Int, height: Int): Int {
-            val ids = IntArray(1)
-            GLES30.glGenTextures(1, ids, 0)
-            checkGlError("glGenTextures output")
-            val texId = ids[0]
-            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, texId)
-            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
-            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
-            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
-            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
-            GLES30.glTexImage2D(
-                GLES30.GL_TEXTURE_2D,
-                0,
-                GLES30.GL_RGBA,
-                width,
-                height,
-                0,
-                GLES30.GL_RGBA,
-                GLES30.GL_UNSIGNED_BYTE,
-                null
-            )
-            checkGlError("texImage2D output")
-            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
-            return texId
-        }
-
         private fun drawFullScreenQuad() {
             quadBuffer.position(0)
             GLES30.glEnableVertexAttribArray(positionLoc)
@@ -504,8 +538,15 @@ object LutUtils {
             GLES30.glDisableVertexAttribArray(texCoordLoc)
         }
 
-        private fun readBitmapFromFramebuffer(width: Int, height: Int): Bitmap {
-            val buffer = ByteBuffer.allocateDirect(width * height * 4).order(ByteOrder.nativeOrder())
+        private fun readPixelsToBitmap(width: Int, height: Int, destBitmap: Bitmap?): Bitmap {
+            val requiredCapacity = width * height * 4
+            if (cachedReadBuffer == null || cachedReadBufferCapacity < requiredCapacity) {
+                cachedReadBuffer = ByteBuffer.allocateDirect(requiredCapacity).order(ByteOrder.nativeOrder())
+                cachedReadBufferCapacity = requiredCapacity
+            }
+            val buffer = cachedReadBuffer!!
+            buffer.position(0)
+
             GLES30.glReadPixels(
                 0,
                 0,
@@ -517,23 +558,14 @@ object LutUtils {
             )
             checkGlError("glReadPixels")
 
-            val pixels = IntArray(width * height)
-            for (y in 0 until height) {
-                val srcY = y
-                val dstY = height - 1 - y
-                val srcRowOffset = srcY * width * 4
-                val dstRowOffset = dstY * width
-                for (x in 0 until width) {
-                    val i = srcRowOffset + x * 4
-                    val r = buffer.get(i).toInt() and 0xFF
-                    val g = buffer.get(i + 1).toInt() and 0xFF
-                    val b = buffer.get(i + 2).toInt() and 0xFF
-                    val a = buffer.get(i + 3).toInt() and 0xFF
-                    pixels[dstRowOffset + x] = (a shl 24) or (r shl 16) or (g shl 8) or b
-                }
+            val resultBitmap = if (destBitmap != null && destBitmap.width == width && destBitmap.height == height) {
+                destBitmap
+            } else {
+                Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
             }
 
-            return Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888)
+            resultBitmap.copyPixelsFromBuffer(buffer)
+            return resultBitmap
         }
 
         private fun checkGlError(op: String) {
@@ -572,7 +604,7 @@ object LutUtils {
                 uniform float uLutSize;
                 out vec4 fragColor;
                 void main() {
-                    vec2 inputUv = vec2(vTexCoord.x, 1.0 - vTexCoord.y);
+                    vec2 inputUv = vec2(vTexCoord.x, vTexCoord.y);
                     vec4 src = texture(uInputTex, inputUv);
                     float edge = 1.0 / uLutSize;
                     vec3 coord = clamp(src.rgb, 0.0, 1.0) * (1.0 - edge) + 0.5 * edge;
