@@ -15,6 +15,8 @@ class AppSettings(private val context: Context) {
     var isNoiseReductionOff = false
     var isEdgeModeOff = false
     var isChromaDenoiseOn = false
+    var isCropModeOff = false
+    var focalLength: Int = 24
     var savedPoints: List<PointF>? = null
 
     init {
@@ -30,6 +32,8 @@ class AppSettings(private val context: Context) {
         isNoiseReductionOff = prefs.getBoolean(KEY_NR_OFF, false)
         isEdgeModeOff = prefs.getBoolean(KEY_EDGE_OFF, false)
         isChromaDenoiseOn = prefs.getBoolean(KEY_CHROMA_DENOISE, false)
+        isCropModeOff = prefs.getBoolean(KEY_CROP_MODE_OFF, false)
+        focalLength = prefs.getInt(KEY_FOCAL_LENGTH, 24)
 
         val pointsStr = prefs.getString(KEY_POINTS, null)
         if (pointsStr != null) {
@@ -58,6 +62,8 @@ class AppSettings(private val context: Context) {
         editor.putBoolean(KEY_NR_OFF, isNoiseReductionOff)
         editor.putBoolean(KEY_EDGE_OFF, isEdgeModeOff)
         editor.putBoolean(KEY_CHROMA_DENOISE, isChromaDenoiseOn)
+        editor.putBoolean(KEY_CROP_MODE_OFF, isCropModeOff)
+        editor.putInt(KEY_FOCAL_LENGTH, focalLength)
 
         if (currentPoints.size == 4) {
             val sb = StringBuilder()
@@ -82,5 +88,7 @@ class AppSettings(private val context: Context) {
         private const val KEY_NR_OFF = "nr_off"
         private const val KEY_EDGE_OFF = "edge_off"
         private const val KEY_CHROMA_DENOISE = "chroma_denoise_on"
+        private const val KEY_CROP_MODE_OFF = "crop_mode_off"
+        private const val KEY_FOCAL_LENGTH = "focal_length"
     }
 }

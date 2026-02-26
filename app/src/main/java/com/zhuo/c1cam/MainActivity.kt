@@ -127,6 +127,8 @@ class MainActivity : AppCompatActivity() {
             overlay.setNormalizedPoints(appSettings.savedPoints!!)
         }
 
+        overlay.isOverlayVisible = !appSettings.isCropModeOff
+
         focusSlider.addOnChangeListener { _, value, fromUser ->
             if (fromUser) {
                 appSettings.focusVal = value
@@ -189,7 +191,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showSettingsMenu() {
-        val options = arrayOf("Target Aspect Ratio", "Select LUT", "Advanced Settings")
+        val options = arrayOf("Target Aspect Ratio", "Select LUT", "Advanced Settings", "Select Focal Length")
 
         MaterialAlertDialogBuilder(this)
             .setTitle("Settings")
@@ -198,14 +200,41 @@ class MainActivity : AppCompatActivity() {
                     0 -> showAspectRatioDialog()
                     1 -> showLutDialog()
                     2 -> showAdvancedSettingsDialog()
+                    3 -> showFocalLengthDialog()
                 }
             }
             .show()
     }
 
+    private fun showFocalLengthDialog() {
+        val options = arrayOf("24mm (1x)", "28mm (1.17x)", "35mm (1.46x)", "40mm (1.67x)", "50mm (2.08x)")
+        val values = intArrayOf(24, 28, 35, 40, 50)
+
+        // Find current selection index
+        val currentVal = appSettings.focalLength
+        var selectedIndex = 0
+        for (i in values.indices) {
+            if (values[i] == currentVal) {
+                selectedIndex = i
+                break
+            }
+        }
+
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Select Focal Length")
+            .setSingleChoiceItems(options, selectedIndex) { dialog, which ->
+                appSettings.focalLength = values[which]
+                appSettings.save(overlay.getNormalizedPoints())
+                Toast.makeText(this, "Focal Length set to ${options[which]}", Toast.LENGTH_SHORT).show()
+                dialog.dismiss()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
     private fun showAdvancedSettingsDialog() {
-        val options = arrayOf("Sports Mode", "Disable Noise Reduction", "Disable Edge Sharpening", "Chroma Noise Reduction")
-        val checkedItems = booleanArrayOf(appSettings.isSportsMode, appSettings.isNoiseReductionOff, appSettings.isEdgeModeOff, appSettings.isChromaDenoiseOn)
+        val options = arrayOf("Sports Mode", "Disable Noise Reduction", "Disable Edge Sharpening", "Chroma Noise Reduction", "Disable Crop Mode")
+        val checkedItems = booleanArrayOf(appSettings.isSportsMode, appSettings.isNoiseReductionOff, appSettings.isEdgeModeOff, appSettings.isChromaDenoiseOn, appSettings.isCropModeOff)
 
         MaterialAlertDialogBuilder(this)
             .setTitle("Advanced Settings")
@@ -215,11 +244,13 @@ class MainActivity : AppCompatActivity() {
                     1 -> appSettings.isNoiseReductionOff = isChecked
                     2 -> appSettings.isEdgeModeOff = isChecked
                     3 -> appSettings.isChromaDenoiseOn = isChecked
+                    4 -> appSettings.isCropModeOff = isChecked
                 }
             }
             .setPositiveButton("OK") { _, _ ->
                 appSettings.save(overlay.getNormalizedPoints())
                 cameraManager.updateCameraSettings()
+                overlay.isOverlayVisible = !appSettings.isCropModeOff
                 // Re-apply manual focus in case mode changed
                 cameraManager.setFocusDistance(focusSlider.value)
             }
