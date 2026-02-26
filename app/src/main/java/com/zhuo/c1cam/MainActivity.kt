@@ -127,8 +127,6 @@ class MainActivity : AppCompatActivity() {
             overlay.setNormalizedPoints(appSettings.savedPoints!!)
         }
 
-        overlay.isOverlayVisible = !appSettings.isCropModeOff
-
         focusSlider.addOnChangeListener { _, value, fromUser ->
             if (fromUser) {
                 appSettings.focusVal = value
@@ -206,8 +204,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showAdvancedSettingsDialog() {
-        val options = arrayOf("Sports Mode", "Disable Noise Reduction", "Disable Edge Sharpening", "Chroma Noise Reduction", "Disable Crop Mode")
-        val checkedItems = booleanArrayOf(appSettings.isSportsMode, appSettings.isNoiseReductionOff, appSettings.isEdgeModeOff, appSettings.isChromaDenoiseOn, appSettings.isCropModeOff)
+        val options = arrayOf("Sports Mode", "Disable Noise Reduction", "Disable Edge Sharpening", "Chroma Noise Reduction")
+        val checkedItems = booleanArrayOf(appSettings.isSportsMode, appSettings.isNoiseReductionOff, appSettings.isEdgeModeOff, appSettings.isChromaDenoiseOn)
 
         MaterialAlertDialogBuilder(this)
             .setTitle("Advanced Settings")
@@ -217,13 +215,11 @@ class MainActivity : AppCompatActivity() {
                     1 -> appSettings.isNoiseReductionOff = isChecked
                     2 -> appSettings.isEdgeModeOff = isChecked
                     3 -> appSettings.isChromaDenoiseOn = isChecked
-                    4 -> appSettings.isCropModeOff = isChecked
                 }
             }
             .setPositiveButton("OK") { _, _ ->
                 appSettings.save(overlay.getNormalizedPoints())
                 cameraManager.updateCameraSettings()
-                overlay.isOverlayVisible = !appSettings.isCropModeOff
                 // Re-apply manual focus in case mode changed
                 cameraManager.setFocusDistance(focusSlider.value)
             }
