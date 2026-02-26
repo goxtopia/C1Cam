@@ -23,7 +23,8 @@ class ImageProcessor(private val context: Context) {
         viewH: Int,
         targetAspectRatio: Float,
         currentLut: Lut3D?,
-        isChromaDenoiseOn: Boolean
+        isChromaDenoiseOn: Boolean,
+        isCropModeOff: Boolean
     ) {
         val rotationDegrees = imageProxy.imageInfo.rotationDegrees
 
@@ -50,16 +51,22 @@ class ImageProcessor(private val context: Context) {
             bitmap
         }
 
-        // Map points
-        val mappedPoints = mapPointsToImage(normalizedViewPoints, uprightBitmap.width, uprightBitmap.height, viewW, viewH)
+        val finalBitmap = if (isCropModeOff) {
+            currentLut?.let {
+                LutUtils.applyLut(uprightBitmap, it)
+            } ?: uprightBitmap
+        } else {
+            // Map points
+            val mappedPoints = mapPointsToImage(normalizedViewPoints, uprightBitmap.width, uprightBitmap.height, viewW, viewH)
 
-        // Rectify (Full resolution for capture)
-        val rectifiedBitmap = RectificationUtils.rectifyBitmap(uprightBitmap, mappedPoints, targetAspectRatio, maxDimension = 0)
+            // Rectify (Full resolution for capture)
+            val rectifiedBitmap = RectificationUtils.rectifyBitmap(uprightBitmap, mappedPoints, targetAspectRatio, maxDimension = 0)
 
-        // Apply LUT if active
-        val finalBitmap = currentLut?.let {
-            LutUtils.applyLut(rectifiedBitmap, it)
-        } ?: rectifiedBitmap
+            // Apply LUT if active
+            currentLut?.let {
+                LutUtils.applyLut(rectifiedBitmap, it)
+            } ?: rectifiedBitmap
+        }
 
         // Save
         saveBitmapToGallery(finalBitmap)
@@ -71,7 +78,8 @@ class ImageProcessor(private val context: Context) {
         viewW: Int,
         viewH: Int,
         targetAspectRatio: Float,
-        currentLut: Lut3D?
+        currentLut: Lut3D?,
+        isCropModeOff: Boolean
     ): Bitmap {
         val rotationDegrees = imageProxy.imageInfo.rotationDegrees
         val bitmap = imageProxy.toBitmap()
@@ -85,14 +93,32 @@ class ImageProcessor(private val context: Context) {
             bitmap
         }
 
-        // Map points and rectify
-        val mappedPoints = mapPointsToImage(normalizedViewPoints, uprightBitmap.width, uprightBitmap.height, viewW, viewH)
-        val rectifiedBitmap = RectificationUtils.rectifyBitmap(uprightBitmap, mappedPoints, targetAspectRatio, maxDimension = 512)
+        if (isCropModeOff) {
+            // Scale down for preview performance
+            val maxDim = 512
+            val w = uprightBitmap.width
+            val h = uprightBitmap.height
+            val scale = if (max(w, h) > maxDim) maxDim.toFloat() / max(w, h).toFloat() else 1f
 
-        // Apply LUT if active
-        return currentLut?.let {
-            LutUtils.applyLut(rectifiedBitmap, it)
-        } ?: rectifiedBitmap
+            val scaledBitmap = if (scale < 1f) {
+                Bitmap.createScaledBitmap(uprightBitmap, (w * scale).toInt(), (h * scale).toInt(), true)
+            } else {
+                uprightBitmap
+            }
+
+            return currentLut?.let {
+                LutUtils.applyLut(scaledBitmap, it)
+            } ?: scaledBitmap
+        } else {
+            // Map points and rectify
+            val mappedPoints = mapPointsToImage(normalizedViewPoints, uprightBitmap.width, uprightBitmap.height, viewW, viewH)
+            val rectifiedBitmap = RectificationUtils.rectifyBitmap(uprightBitmap, mappedPoints, targetAspectRatio, maxDimension = 512)
+
+            // Apply LUT if active
+            return currentLut?.let {
+                LutUtils.applyLut(rectifiedBitmap, it)
+            } ?: rectifiedBitmap
+        }
     }
 
     private fun mapPointsToImage(
