@@ -87,6 +87,15 @@ object ChromaNoiseReduction {
             float finalU = sumU / sumW;
             float finalV = sumV / sumW;
 
+            // Trick: Desaturate dark areas to reduce color noise
+            float threshold = 0.2;
+            if (centerY < threshold) {
+                float factor = centerY / threshold;
+                // Linearly interpolate towards 0.5 (grayscale for U/V)
+                finalU = mix(0.5, finalU, factor);
+                finalV = mix(0.5, finalV, factor);
+            }
+
             // Reconstruct RGB with original Y and filtered U/V
             vec3 rgb = yuv2rgb(centerY, finalU, finalV);
             gl_FragColor = vec4(rgb, 1.0);
