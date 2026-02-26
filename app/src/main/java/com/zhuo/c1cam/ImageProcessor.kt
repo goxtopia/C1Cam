@@ -23,7 +23,9 @@ class ImageProcessor(private val context: Context) {
         viewH: Int,
         targetAspectRatio: Float,
         currentLut: Lut3D?,
-        isChromaDenoiseOn: Boolean
+        isChromaDenoiseOn: Boolean,
+        isCropModeOff: Boolean,
+        focalLength: Int
     ) {
         val rotationDegrees = imageProxy.imageInfo.rotationDegrees
 
@@ -50,16 +52,23 @@ class ImageProcessor(private val context: Context) {
             bitmap
         }
 
-        // Map points
-        val mappedPoints = mapPointsToImage(normalizedViewPoints, uprightBitmap.width, uprightBitmap.height, viewW, viewH)
+        val finalBitmap = if (isCropModeOff) {
+            val croppedBitmap = cropForFocalLength(uprightBitmap, focalLength)
+            currentLut?.let {
+                LutUtils.applyLut(croppedBitmap, it)
+            } ?: croppedBitmap
+        } else {
+            // Map points
+            val mappedPoints = mapPointsToImage(normalizedViewPoints, uprightBitmap.width, uprightBitmap.height, viewW, viewH)
 
-        // Rectify (Full resolution for capture)
-        val rectifiedBitmap = RectificationUtils.rectifyBitmap(uprightBitmap, mappedPoints, targetAspectRatio, maxDimension = 0)
+            // Rectify (Full resolution for capture)
+            val rectifiedBitmap = RectificationUtils.rectifyBitmap(uprightBitmap, mappedPoints, targetAspectRatio, maxDimension = 0)
 
-        // Apply LUT if active
-        val finalBitmap = currentLut?.let {
-            LutUtils.applyLut(rectifiedBitmap, it)
-        } ?: rectifiedBitmap
+            // Apply LUT if active
+            currentLut?.let {
+                LutUtils.applyLut(rectifiedBitmap, it)
+            } ?: rectifiedBitmap
+        }
 
         // Save
         saveBitmapToGallery(finalBitmap)
@@ -71,7 +80,9 @@ class ImageProcessor(private val context: Context) {
         viewW: Int,
         viewH: Int,
         targetAspectRatio: Float,
-        currentLut: Lut3D?
+        currentLut: Lut3D?,
+        isCropModeOff: Boolean,
+        focalLength: Int
     ): Bitmap {
         val rotationDegrees = imageProxy.imageInfo.rotationDegrees
         val bitmap = imageProxy.toBitmap()
@@ -85,14 +96,35 @@ class ImageProcessor(private val context: Context) {
             bitmap
         }
 
-        // Map points and rectify
-        val mappedPoints = mapPointsToImage(normalizedViewPoints, uprightBitmap.width, uprightBitmap.height, viewW, viewH)
-        val rectifiedBitmap = RectificationUtils.rectifyBitmap(uprightBitmap, mappedPoints, targetAspectRatio, maxDimension = 512)
+        if (isCropModeOff) {
+            // Digital Zoom Crop
+            val croppedBitmap = cropForFocalLength(uprightBitmap, focalLength)
 
-        // Apply LUT if active
-        return currentLut?.let {
-            LutUtils.applyLut(rectifiedBitmap, it)
-        } ?: rectifiedBitmap
+            // Scale down for preview performance
+            val maxDim = 512
+            val w = croppedBitmap.width
+            val h = croppedBitmap.height
+            val scale = if (max(w, h) > maxDim) maxDim.toFloat() / max(w, h).toFloat() else 1f
+
+            val scaledBitmap = if (scale < 1f) {
+                Bitmap.createScaledBitmap(croppedBitmap, (w * scale).toInt(), (h * scale).toInt(), true)
+            } else {
+                croppedBitmap
+            }
+
+            return currentLut?.let {
+                LutUtils.applyLut(scaledBitmap, it)
+            } ?: scaledBitmap
+        } else {
+            // Map points and rectify
+            val mappedPoints = mapPointsToImage(normalizedViewPoints, uprightBitmap.width, uprightBitmap.height, viewW, viewH)
+            val rectifiedBitmap = RectificationUtils.rectifyBitmap(uprightBitmap, mappedPoints, targetAspectRatio, maxDimension = 512)
+
+            // Apply LUT if active
+            return currentLut?.let {
+                LutUtils.applyLut(rectifiedBitmap, it)
+            } ?: rectifiedBitmap
+        }
     }
 
     private fun mapPointsToImage(
@@ -128,6 +160,16 @@ class ImageProcessor(private val context: Context) {
             // Normalize to Image (0..1)
             PointF(pImageX / imageW, pImageY / imageH)
         }
+    }
+
+    private fun cropForFocalLength(bitmap: Bitmap, focalLength: Int): Bitmap {
+        if (focalLength <= 24) return bitmap
+        val scale = focalLength / 24.0f
+        val w = (bitmap.width / scale).toInt()
+        val h = (bitmap.height / scale).toInt()
+        val x = (bitmap.width - w) / 2
+        val y = (bitmap.height - h) / 2
+        return Bitmap.createBitmap(bitmap, x, y, w, h)
     }
 
     private fun saveBitmapToGallery(bitmap: Bitmap) {

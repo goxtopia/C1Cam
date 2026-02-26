@@ -52,6 +52,12 @@ class OverlayView @JvmOverloads constructor(
             invalidate()
         }
 
+    var isOverlayVisible = true
+        set(value) {
+            field = value
+            invalidate()
+        }
+
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
         if (w > 0 && h > 0) {
@@ -77,7 +83,7 @@ class OverlayView @JvmOverloads constructor(
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        if (!isInitialized || points.size != 4) return
+        if (!isOverlayVisible || !isInitialized || points.size != 4) return
 
         path.rewind()
         path.moveTo(points[0].x, points[0].y)
@@ -103,6 +109,8 @@ class OverlayView @JvmOverloads constructor(
         if (gestureDetector.onTouchEvent(event)) {
             return true
         }
+
+        if (!isOverlayVisible) return false
 
         if (!isEditMode) return true
 
