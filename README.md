@@ -12,13 +12,13 @@
 
 ### ✨ 核心特性
 
-*   🖼️ **自定义画幅与自动复原**：支持在预览画面中设定一个矩形取景框，并设定缩放后的目标比例。点击拍摄后，APP 将自动根据设定的参数生成复原后的照片，所见即所得。
+*   🖼️ **自定义画幅与自动复原**：支持在预览画面中设定一个四点定位取景框，并设定缩放后的目标比例。点击拍摄后，APP 将自动根据设定的参数生成复原后的照片，所见即所得。
 *   🎛️ **核心手动控制**：支持**手动对焦 (MF)**，以及提供两档 **曝光补偿 (EV)** 调节，满足复杂光线下的拍摄需求。
-*   🎨 **LUT 色彩滤镜**：内置多款精美的 LUT（色彩查找表）文件，拍完直接输出风格化的胶片质感。
+*   🎨 **LUT 色彩滤镜**：内置多款 LUT（色彩查找表）文件，拍完直接输出风格化的胶片质感。
 *   ⚡ **OpenGL 硬件加速**：底层采用 OpenGL 进行图像渲染与处理，大幅提升照片生成与算法处理速度。
 *   📷 **追求极致纯净画质**：支持强制**关闭 Android Camera 自带的降噪算法**。摒弃数码涂抹感，为你带来更加纯粹、细节更丰富的大画幅摄影体验。
-*   🌈 **自研去彩噪算法**：为了配合纯净画质模式，APP 内置了降低彩色噪点（Chroma Noise）的功能。**强烈推荐与“关闭自带降噪”功能搭配使用**。
-*   🌅 **WDR（宽动态范围）**：支持 WDR 拍摄模式，保留更多高光与阴影细节（*注：该功能目前仍在开发测试阶段，体验尚不完善*）。
+*   🌈 **去彩噪算法**：为了配合纯净画质模式，APP 内置了降低彩色噪点（Chroma Noise）的功能。**强烈推荐与“关闭自带降噪”功能搭配使用**。
+*   🌅 **WDR（宽动态范围）**：支持 WDR 拍摄模式，保留更多高光与阴影细节（*注：体验尚不完善*）。
 *   ✂️ **退坑也能玩（数码裁切）**：如果你不再使用沧野C1相机，APP 内置了几个常见的经典焦段预设，你可以将它当作一个普通相机，体验纯粹的“数码裁切”摄影乐趣。
 
 ### 🐛 已知问题 (Known Issues)
@@ -33,9 +33,9 @@ An Android camera application **"almost"** exclusively tailored for the **Cangye
 
 ### ✨ Features
 
-*   🖼️ **Custom Framing & Auto-Restoration**: Allows you to define a rectangular viewfinder frame on the screen and set a target scaling ratio. Once you press the shutter, the app automatically generates the restored photo based on your parameters. What you see is what you get.
+*   🖼️ **Custom Framing & Auto-Restoration**: Allows you to define a four-point posting viewfinder frame on the screen and set a target scaling ratio. Once you press the shutter, the app automatically generates the restored photo based on your parameters. What you see is what you get.
 *   🎛️ **Manual Controls**: Supports **Manual Focus (MF)** and provides a two-step **Exposure Value (EV)** adjustment to handle complex lighting conditions.
-*   🎨 **LUT Support**: Comes with several built-in LUT (Look-Up Table) files, allowing you to instantly output stylized, cinematic, or film-like photos.
+*   🎨 **LUT Support**: Comes with several built-in LUT (Look-Up Table) files, allowing you to output stylized, cinematic, or film-like photos instantly.
 *   ⚡ **OpenGL Acceleration**: Utilizes OpenGL for underlying image rendering and processing, significantly improving the speed of photo generation and algorithm execution.
 *   📷 **Pure Image Quality**: Supports forcibly **disabling the Android Camera's built-in noise reduction algorithms**. Say goodbye to digital smoothing and capture purer photos with rich, raw details.
 *   🌈 **Chroma Noise Reduction**: Features a dedicated tool to reduce color noise. **Highly recommended to be used in conjunction with the "Disable Built-in Noise Reduction" feature** for the best texture and image quality.
