@@ -33,6 +33,7 @@ object GlRectificationUtils {
     private var sourceTexId = 0
     private var sourceTexW = 0
     private var sourceTexH = 0
+    private var sourceTexConfig: Bitmap.Config? = null
 
     private var outputTexId = 0
     private var fboId = 0
@@ -80,6 +81,17 @@ object GlRectificationUtils {
             position(0)
         }
 
+    /**
+     * Rectifies a 4-point source quadrilateral to fill the destination bitmap using GLES.
+     *
+     * @param sourceBitmap Source frame bitmap (ARGB_8888 expected for best performance).
+     * @param destBitmap Destination bitmap that receives the rectified image.
+     * @param normalizedPoints Source quadrilateral in normalized source-view space (0..1),
+     * ordered as top-left, top-right, bottom-right, bottom-left.
+     * @return true if GL rectification succeeded; false means caller should use CPU fallback.
+     *
+     * Threading: call from a dedicated processing thread.
+     */
     @Synchronized
     fun rectifyToBitmap(sourceBitmap: Bitmap, destBitmap: Bitmap, normalizedPoints: List<PointF>): Boolean {
         if (normalizedPoints.size != 4) return false
@@ -129,7 +141,8 @@ object GlRectificationUtils {
                 buffer
             )
 
-            if (readBitmap == null || readBitmap!!.width != destBitmap.width || readBitmap!!.height != destBitmap.height) {
+            if (readBitmap?.width != destBitmap.width || readBitmap?.height != destBitmap.height) {
+                readBitmap?.recycle()
                 readBitmap = Bitmap.createBitmap(destBitmap.width, destBitmap.height, Bitmap.Config.ARGB_8888)
             }
 
@@ -153,46 +166,51 @@ object GlRectificationUtils {
     private fun ensureInitialized() {
         if (program != 0) return
 
-        eglDisplay = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY)
-        check(eglDisplay != EGL14.EGL_NO_DISPLAY) { "eglGetDisplay failed" }
+        try {
+            eglDisplay = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY)
+            check(eglDisplay != EGL14.EGL_NO_DISPLAY) { "eglGetDisplay failed" }
 
-        val version = IntArray(2)
-        check(EGL14.eglInitialize(eglDisplay, version, 0, version, 1)) { "eglInitialize failed" }
+            val version = IntArray(2)
+            check(EGL14.eglInitialize(eglDisplay, version, 0, version, 1)) { "eglInitialize failed" }
 
-        val configAttribs = intArrayOf(
-            EGL14.EGL_RED_SIZE, 8,
-            EGL14.EGL_GREEN_SIZE, 8,
-            EGL14.EGL_BLUE_SIZE, 8,
-            EGL14.EGL_ALPHA_SIZE, 8,
-            EGL14.EGL_RENDERABLE_TYPE, EGL14.EGL_OPENGL_ES2_BIT,
-            EGL14.EGL_NONE
-        )
-        val configs = arrayOfNulls<EGLConfig>(1)
-        val numConfigs = IntArray(1)
-        check(EGL14.eglChooseConfig(eglDisplay, configAttribs, 0, configs, 0, 1, numConfigs, 0) && numConfigs[0] > 0) {
-            "eglChooseConfig failed"
+            val configAttribs = intArrayOf(
+                EGL14.EGL_RED_SIZE, 8,
+                EGL14.EGL_GREEN_SIZE, 8,
+                EGL14.EGL_BLUE_SIZE, 8,
+                EGL14.EGL_ALPHA_SIZE, 8,
+                EGL14.EGL_RENDERABLE_TYPE, EGL14.EGL_OPENGL_ES2_BIT,
+                EGL14.EGL_NONE
+            )
+            val configs = arrayOfNulls<EGLConfig>(1)
+            val numConfigs = IntArray(1)
+            check(EGL14.eglChooseConfig(eglDisplay, configAttribs, 0, configs, 0, 1, numConfigs, 0) && numConfigs[0] > 0) {
+                "eglChooseConfig failed"
+            }
+            val config = configs[0] ?: error("No EGL config")
+
+            val contextAttribs = intArrayOf(EGL14.EGL_CONTEXT_CLIENT_VERSION, 2, EGL14.EGL_NONE)
+            eglContext = EGL14.eglCreateContext(eglDisplay, config, EGL14.EGL_NO_CONTEXT, contextAttribs, 0)
+            check(eglContext != EGL14.EGL_NO_CONTEXT) { "eglCreateContext failed" }
+
+            val surfaceAttribs = intArrayOf(EGL14.EGL_WIDTH, 1, EGL14.EGL_HEIGHT, 1, EGL14.EGL_NONE)
+            eglSurface = EGL14.eglCreatePbufferSurface(eglDisplay, config, surfaceAttribs, 0)
+            check(eglSurface != EGL14.EGL_NO_SURFACE) { "eglCreatePbufferSurface failed" }
+
+            check(EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)) { "eglMakeCurrent failed" }
+
+            program = createProgram(VERTEX_SHADER, FRAGMENT_SHADER)
+            check(program != 0) { "createProgram failed" }
+
+            aPosition = GLES20.glGetAttribLocation(program, "aPosition")
+            aDstCoord = GLES20.glGetAttribLocation(program, "aDstCoord")
+            uTexture = GLES20.glGetUniformLocation(program, "uTexture")
+            uHomography = GLES20.glGetUniformLocation(program, "uHomography")
+
+            sourceTexId = createTexture()
+        } catch (e: Exception) {
+            releaseInternal()
+            throw e
         }
-        val config = configs[0] ?: error("No EGL config")
-
-        val contextAttribs = intArrayOf(EGL14.EGL_CONTEXT_CLIENT_VERSION, 2, EGL14.EGL_NONE)
-        eglContext = EGL14.eglCreateContext(eglDisplay, config, EGL14.EGL_NO_CONTEXT, contextAttribs, 0)
-        check(eglContext != EGL14.EGL_NO_CONTEXT) { "eglCreateContext failed" }
-
-        val surfaceAttribs = intArrayOf(EGL14.EGL_WIDTH, 1, EGL14.EGL_HEIGHT, 1, EGL14.EGL_NONE)
-        eglSurface = EGL14.eglCreatePbufferSurface(eglDisplay, config, surfaceAttribs, 0)
-        check(eglSurface != EGL14.EGL_NO_SURFACE) { "eglCreatePbufferSurface failed" }
-
-        check(EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)) { "eglMakeCurrent failed" }
-
-        program = createProgram(VERTEX_SHADER, FRAGMENT_SHADER)
-        check(program != 0) { "createProgram failed" }
-
-        aPosition = GLES20.glGetAttribLocation(program, "aPosition")
-        aDstCoord = GLES20.glGetAttribLocation(program, "aDstCoord")
-        uTexture = GLES20.glGetUniformLocation(program, "uTexture")
-        uHomography = GLES20.glGetUniformLocation(program, "uHomography")
-
-        sourceTexId = createTexture()
     }
 
     private fun ensureOutputTarget(width: Int, height: Int) {
@@ -243,29 +261,38 @@ object GlRectificationUtils {
 
     private fun ensureSourceTexture(bitmap: Bitmap) {
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, sourceTexId)
-        if (sourceTexW != bitmap.width || sourceTexH != bitmap.height) {
+        if (sourceTexW != bitmap.width || sourceTexH != bitmap.height || sourceTexConfig != bitmap.config) {
             GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bitmap, 0)
             sourceTexW = bitmap.width
             sourceTexH = bitmap.height
+            sourceTexConfig = bitmap.config
         } else {
             GLUtils.texSubImage2D(GLES20.GL_TEXTURE_2D, 0, 0, 0, bitmap)
         }
     }
 
     private fun calculateHomography(normalizedPoints: List<PointF>): FloatArray {
-        val src = floatArrayOf(
-            normalizedPoints[0].x.coerceIn(0f, 1f), (1f - normalizedPoints[0].y).coerceIn(0f, 1f),
-            normalizedPoints[1].x.coerceIn(0f, 1f), (1f - normalizedPoints[1].y).coerceIn(0f, 1f),
-            normalizedPoints[2].x.coerceIn(0f, 1f), (1f - normalizedPoints[2].y).coerceIn(0f, 1f),
-            normalizedPoints[3].x.coerceIn(0f, 1f), (1f - normalizedPoints[3].y).coerceIn(0f, 1f)
+        fun clampedX(point: PointF): Float = point.x.coerceIn(0f, 1f)
+        fun clampedY(point: PointF): Float = (1f - point.y).coerceIn(0f, 1f)
+
+        val p0 = normalizedPoints[0]
+        val p1 = normalizedPoints[1]
+        val p2 = normalizedPoints[2]
+        val p3 = normalizedPoints[3]
+
+        val sourceQuadCoords = floatArrayOf(
+            clampedX(p0), clampedY(p0),
+            clampedX(p1), clampedY(p1),
+            clampedX(p2), clampedY(p2),
+            clampedX(p3), clampedY(p3)
         )
-        val dst = floatArrayOf(
+        val targetRectCoords = floatArrayOf(
             0f, 0f,
             1f, 0f,
             1f, 1f,
             0f, 1f
         )
-        return solveHomography(dst, src)
+        return solveHomography(targetRectCoords, sourceQuadCoords)
     }
 
     private fun solveHomography(from: FloatArray, to: FloatArray): FloatArray {
@@ -302,11 +329,11 @@ object GlRectificationUtils {
             b[r1] = v
         }
 
-        val x = gaussianElimination(a, b)
+        val homographyCoeffs = gaussianElimination(a, b)
         return floatArrayOf(
-            x[0], x[3], x[6],
-            x[1], x[4], x[7],
-            x[2], x[5], 1f
+            homographyCoeffs[0], homographyCoeffs[3], homographyCoeffs[6],
+            homographyCoeffs[1], homographyCoeffs[4], homographyCoeffs[7],
+            homographyCoeffs[2], homographyCoeffs[5], 1f
         )
     }
 
@@ -332,7 +359,7 @@ object GlRectificationUtils {
             }
 
             val diag = a[col][col]
-            if (kotlin.math.abs(diag) < 1e-6f) error("Homography solve failed")
+            if (kotlin.math.abs(diag) < 1e-6f) error("Homography computation failed: matrix is singular or ill-conditioned")
 
             for (j in col until 8) {
                 a[col][j] /= diag
@@ -421,4 +448,60 @@ object GlRectificationUtils {
             gl_FragColor = texture2D(uTexture, uv);
         }
     """
+
+    @Synchronized
+    fun release() {
+        releaseInternal()
+    }
+
+    private fun releaseInternal() {
+        if (eglDisplay != EGL14.EGL_NO_DISPLAY) {
+            EGL14.eglMakeCurrent(eglDisplay, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
+
+            if (program != 0) {
+                GLES20.glDeleteProgram(program)
+            }
+            if (sourceTexId != 0) {
+                GLES20.glDeleteTextures(1, intArrayOf(sourceTexId), 0)
+            }
+            if (outputTexId != 0) {
+                GLES20.glDeleteTextures(1, intArrayOf(outputTexId), 0)
+            }
+            if (fboId != 0) {
+                GLES20.glDeleteFramebuffers(1, intArrayOf(fboId), 0)
+            }
+
+            if (eglSurface != EGL14.EGL_NO_SURFACE) {
+                EGL14.eglDestroySurface(eglDisplay, eglSurface)
+            }
+            if (eglContext != EGL14.EGL_NO_CONTEXT) {
+                EGL14.eglDestroyContext(eglDisplay, eglContext)
+            }
+            EGL14.eglTerminate(eglDisplay)
+        }
+
+        resetCachedState()
+    }
+
+    private fun resetCachedState() {
+        eglDisplay = EGL14.EGL_NO_DISPLAY
+        eglContext = EGL14.EGL_NO_CONTEXT
+        eglSurface = EGL14.EGL_NO_SURFACE
+        program = 0
+        aPosition = 0
+        aDstCoord = 0
+        uTexture = 0
+        uHomography = 0
+        sourceTexId = 0
+        sourceTexW = 0
+        sourceTexH = 0
+        sourceTexConfig = null
+        outputTexId = 0
+        fboId = 0
+        outputW = 0
+        outputH = 0
+        readBitmap?.recycle()
+        readBitmap = null
+        readBuffer = null
+    }
 }

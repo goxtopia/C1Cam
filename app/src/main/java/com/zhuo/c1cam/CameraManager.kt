@@ -25,6 +25,7 @@ import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 class CameraManager(
     private val activity: AppCompatActivity,
@@ -245,5 +246,14 @@ class CameraManager(
 
     fun shutdown() {
         cameraExecutor.shutdown()
+        try {
+            if (!cameraExecutor.awaitTermination(2, TimeUnit.SECONDS)) {
+                cameraExecutor.shutdownNow()
+            }
+        } catch (e: InterruptedException) {
+            cameraExecutor.shutdownNow()
+            Thread.currentThread().interrupt()
+        }
+        GlRectificationUtils.release()
     }
 }
