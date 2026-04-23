@@ -115,6 +115,12 @@ object RectificationUtils {
         canvas.drawBitmap(sourceBitmap, matrix, paint)
     }
 
+    fun rectifyToBitmapRealtime(sourceBitmap: Bitmap, destBitmap: Bitmap, normalizedPoints: List<PointF>) {
+        if (normalizedPoints.size != 4 || !GlRectificationUtils.rectifyToBitmap(sourceBitmap, destBitmap, normalizedPoints)) {
+            rectifyToBitmap(sourceBitmap, destBitmap, normalizedPoints)
+        }
+    }
+
     fun rectifyBitmap(sourceBitmap: Bitmap, normalizedPoints: List<PointF>, targetAspectRatio: Float, maxDimension: Int = 0): Bitmap {
         val dims = getRectifiedDimensions(sourceBitmap, normalizedPoints, targetAspectRatio, maxDimension)
         val dstW = dims[0]

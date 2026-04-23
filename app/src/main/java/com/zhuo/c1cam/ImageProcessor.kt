@@ -169,8 +169,8 @@ class ImageProcessor(private val context: Context) {
             }
             val rectBmp = reusedRectifiedBitmap!!
 
-            // Rectify
-            RectificationUtils.rectifyToBitmap(uprightBmp, rectBmp, mappedPoints)
+            // Rectify with GL acceleration and CPU fallback
+            RectificationUtils.rectifyToBitmapRealtime(uprightBmp, rectBmp, mappedPoints)
 
             intermediateBitmap = rectBmp
         }
