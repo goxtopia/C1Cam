@@ -460,7 +460,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun launchImportLutPicker() {
-        importLutLauncher.launch(arrayOf("text/*", "application/octet-stream"))
+        importLutLauncher.launch(arrayOf("text/plain", "application/octet-stream", "*/*"))
     }
 
     private fun importLutFromUri(uri: Uri) {
@@ -498,7 +498,7 @@ class MainActivity : AppCompatActivity() {
         var targetFile = File(importedDir, safeName)
         while (targetFile.exists()) {
             duplicateIndex += 1
-            targetFile = File(importedDir, "${baseName}_${System.currentTimeMillis()}_$duplicateIndex.$ext")
+            targetFile = File(importedDir, "${baseName}_$duplicateIndex.$ext")
         }
 
         val copied = contentResolver.openInputStream(uri)?.use { input ->
@@ -522,7 +522,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun sanitizeImportedLutName(rawName: String?): String? {
-        val fallback = "imported_${System.currentTimeMillis()}.cube"
+        val fallback = "untitled_lut_${System.currentTimeMillis()}.cube"
         val normalized = (rawName ?: fallback).substringAfterLast('/').substringAfterLast('\\').trim()
         val safeBase = normalized.replace(Regex("[^A-Za-z0-9._-]"), "_").ifEmpty { fallback }
         val withExt = if (safeBase.endsWith(".cube", ignoreCase = true)) safeBase else "$safeBase.cube"
@@ -628,7 +628,7 @@ class MainActivity : AppCompatActivity() {
         if (fileName.contains('/') || fileName.contains('\\')) return false
         if (fileName.contains("..")) return false
         if (fileName.startsWith('.')) return false
-        return fileName.matches(Regex("^[A-Za-z0-9][A-Za-z0-9._-]*\\.cube$", RegexOption.IGNORE_CASE))
+        return fileName.matches(Regex("^[A-Za-z0-9._-]+\\.cube$", RegexOption.IGNORE_CASE))
     }
 
     private fun captureCurrentPreviewBitmap(): Bitmap {
