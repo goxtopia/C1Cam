@@ -34,6 +34,7 @@ import androidx.core.view.WindowInsetsCompat
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.slider.Slider
 import java.io.File
+import java.util.UUID
 import java.util.concurrent.Executors
 
 class MainActivity : AppCompatActivity() {
@@ -460,7 +461,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun launchImportLutPicker() {
-        importLutLauncher.launch(arrayOf("text/plain", "application/octet-stream", "*/*"))
+        importLutLauncher.launch(arrayOf("text/plain", "application/octet-stream"))
     }
 
     private fun importLutFromUri(uri: Uri) {
@@ -522,7 +523,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun sanitizeImportedLutName(rawName: String?): String? {
-        val fallback = "untitled_lut_${System.currentTimeMillis()}.cube"
+        val fallback = "untitled_lut_${UUID.randomUUID()}.cube"
         val normalized = (rawName ?: fallback).substringAfterLast('/').substringAfterLast('\\').trim()
         val safeBase = normalized.replace(Regex("[^A-Za-z0-9._-]"), "_").ifEmpty { fallback }
         val withExt = if (safeBase.endsWith(".cube", ignoreCase = true)) safeBase else "$safeBase.cube"
@@ -579,7 +580,7 @@ class MainActivity : AppCompatActivity() {
             LutSource.ASSET -> option.fileName?.let { LutUtils.loadLut(this, it) }
             LutSource.IMPORTED -> {
                 val fileName = option.fileName ?: return null
-                val file = File(ensureImportedLutDir(), fileName)
+                val file = resolveImportedLutFile(fileName) ?: return null
                 if (!file.exists()) return null
                 file.inputStream().use { LutUtils.loadLut(it) }
             }
@@ -622,6 +623,17 @@ class MainActivity : AppCompatActivity() {
             dir.mkdirs()
         }
         return dir
+    }
+
+    private fun resolveImportedLutFile(fileName: String): File? {
+        if (!isSafeImportedFileName(fileName)) return null
+        return try {
+            val dir = ensureImportedLutDir().canonicalFile
+            val file = File(dir, fileName).canonicalFile
+            if (file.toPath().startsWith(dir.toPath())) file else null
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private fun isSafeImportedFileName(fileName: String): Boolean {
