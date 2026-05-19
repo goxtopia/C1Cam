@@ -7,9 +7,11 @@ import android.graphics.Color
 import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Shader
+import android.net.Uri
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.provider.OpenableColumns
 import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
@@ -31,6 +33,8 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.slider.Slider
+import java.io.File
+import java.util.UUID
 import java.util.concurrent.Executors
 
 class MainActivity : AppCompatActivity() {
@@ -77,6 +81,12 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+    private val importLutLauncher =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            if (uri == null) return@registerForActivityResult
+            importLutFromUri(uri)
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -106,8 +116,15 @@ class MainActivity : AppCompatActivity() {
         appSettings = AppSettings(this)
         imageProcessor = ImageProcessor(this)
         
-        if (appSettings.lutName != null) {
-            currentLut = LutUtils.loadLut(this, appSettings.lutName!!)
+        appSettings.lutName?.let { savedKey ->
+            val normalizedKey = normalizeLutStorageKey(savedKey)
+            val loadedLut = loadLutFromStorageKey(normalizedKey)
+            if (loadedLut != null) {
+                appSettings.lutName = normalizedKey
+                currentLut = loadedLut
+            } else {
+                appSettings.lutName = null
+            }
         }
 
         cameraManager = CameraManager(
@@ -191,7 +208,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showSettingsMenu() {
-        val options = arrayOf("Target Aspect Ratio", "Select LUT", "Advanced Settings", "Select Focal Length")
+        val options = arrayOf("Target Aspect Ratio", "Select LUT", "Import LUT (.cube)", "Advanced Settings", "Select Focal Length")
 
         MaterialAlertDialogBuilder(this)
             .setTitle("Settings")
@@ -199,8 +216,9 @@ class MainActivity : AppCompatActivity() {
                 when (which) {
                     0 -> showAspectRatioDialog()
                     1 -> showLutDialog()
-                    2 -> showAdvancedSettingsDialog()
-                    3 -> showFocalLengthDialog()
+                    2 -> launchImportLutPicker()
+                    3 -> showAdvancedSettingsDialog()
+                    4 -> showFocalLengthDialog()
                 }
             }
             .show()
@@ -323,15 +341,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showLutDialog() {
-        val lutFiles = loadAvailableLutFiles()
+        val lutOptions = loadAvailableLutOptions()
 
-        val originalLutName = appSettings.lutName
+        val originalLutKey = appSettings.lutName
         val originalLut = currentLut
 
-        var selectedLutName = originalLutName
+        var selectedLutKey = originalLutKey
         var selectedLut = currentLut
         val lutCache = mutableMapOf<String, Lut3D?>()
-        originalLutName?.let { lutCache[it] = originalLut }
+        originalLutKey?.let { lutCache[it] = originalLut }
 
         val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_lut_preview, null)
         val previewImage = dialogView.findViewById<ImageView>(R.id.lut_preview_image)
@@ -339,12 +357,12 @@ class MainActivity : AppCompatActivity() {
         val previewProgress = dialogView.findViewById<ProgressBar>(R.id.lut_preview_progress)
         val lutList = dialogView.findViewById<ListView>(R.id.lut_list)
 
-        val adapter = ArrayAdapter(this, R.layout.item_lut_option, android.R.id.text1, lutFiles)
+        val adapter = ArrayAdapter(this, R.layout.item_lut_option, android.R.id.text1, lutOptions.map { it.displayName })
         lutList.adapter = adapter
         lutList.choiceMode = ListView.CHOICE_MODE_SINGLE
 
-        val initialLabel = selectedLutName ?: LUT_NONE_LABEL
-        val initialIndex = lutFiles.indexOf(initialLabel).takeIf { it >= 0 } ?: 0
+        val initialKey = selectedLutKey ?: LUT_NONE_KEY
+        val initialIndex = lutOptions.indexOfFirst { it.storageKey == initialKey }.takeIf { it >= 0 } ?: 0
         lutList.setItemChecked(initialIndex, true)
 
         val previewBaseBitmap = captureCurrentPreviewBitmap()
@@ -352,9 +370,12 @@ class MainActivity : AppCompatActivity() {
         var previewRequestId = 0
         var committed = false
         var dialogClosed = false
+        fun selectedOptionForKey(key: String?): LutOption {
+            return lutOptions.firstOrNull { it.storageKey == (key ?: LUT_NONE_KEY) } ?: lutOptions.first()
+        }
 
-        fun renderPreview(name: String?, lut: Lut3D?) {
-            previewName.text = if (name != null) "Current: $name" else "Current: None (Original)"
+        fun renderPreview(option: LutOption, lut: Lut3D?) {
+            previewName.text = "Current: ${option.displayName}"
             previewProgress.visibility = View.VISIBLE
             val requestId = ++previewRequestId
 
@@ -375,51 +396,52 @@ class MainActivity : AppCompatActivity() {
         }
 
         fun applyTemporarySelection(index: Int) {
-            val previousName = selectedLutName
+            val previousKey = selectedLutKey
             val previousLut = selectedLut
-            val label = lutFiles[index]
+            val option = lutOptions[index]
 
-            if (label == LUT_NONE_LABEL) {
-                selectedLutName = null
+            if (option.storageKey == LUT_NONE_KEY) {
+                selectedLutKey = null
                 selectedLut = null
             } else {
-                val loaded = lutCache.getOrPut(label) { LutUtils.loadLut(this, label) }
+                val loaded = lutCache.getOrPut(option.storageKey) { loadLutOption(option) }
                 if (loaded == null) {
-                    Toast.makeText(this, "Failed to load LUT: $label", Toast.LENGTH_SHORT).show()
-                    val fallbackLabel = previousName ?: LUT_NONE_LABEL
-                    val fallbackIndex = lutFiles.indexOf(fallbackLabel).takeIf { it >= 0 } ?: 0
+                    Toast.makeText(this, "Failed to load LUT: ${option.displayName}", Toast.LENGTH_SHORT).show()
+                    val fallbackKey = previousKey ?: LUT_NONE_KEY
+                    val fallbackIndex = lutOptions.indexOfFirst { it.storageKey == fallbackKey }.takeIf { it >= 0 } ?: 0
                     lutList.setItemChecked(fallbackIndex, true)
-                    selectedLutName = previousName
+                    selectedLutKey = previousKey
                     selectedLut = previousLut
                     return
                 }
-                selectedLutName = label
+                selectedLutKey = option.storageKey
                 selectedLut = loaded
             }
 
             // Apply instantly so the camera preview updates in real time.
             currentLut = selectedLut
-            renderPreview(selectedLutName, selectedLut)
+            renderPreview(selectedOptionForKey(selectedLutKey), selectedLut)
         }
 
         lutList.setOnItemClickListener { _, _, position, _ ->
             applyTemporarySelection(position)
         }
 
-        renderPreview(selectedLutName, selectedLut)
+        renderPreview(lutOptions[initialIndex], selectedLut)
 
         val dialog = MaterialAlertDialogBuilder(this)
             .setTitle("Select LUT")
             .setView(dialogView)
             .setPositiveButton("Apply") { _, _ ->
                 committed = true
-                appSettings.lutName = selectedLutName
+                appSettings.lutName = selectedLutKey
                 currentLut = selectedLut
                 appSettings.save(overlay.getNormalizedPoints())
-                val message = if (selectedLutName == null) {
+                val selectedOption = selectedOptionForKey(selectedLutKey)
+                val message = if (selectedLutKey == null) {
                     "LUT cleared"
                 } else {
-                    "LUT applied: $selectedLutName"
+                    "LUT applied: ${selectedOption.displayName}"
                 }
                 Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
             }
@@ -430,7 +452,7 @@ class MainActivity : AppCompatActivity() {
             dialogClosed = true
             previewExecutor.shutdownNow()
             if (!committed) {
-                appSettings.lutName = originalLutName
+                appSettings.lutName = originalLutKey
                 currentLut = originalLut
             }
         }
@@ -438,18 +460,187 @@ class MainActivity : AppCompatActivity() {
         dialog.show()
     }
 
-    private fun loadAvailableLutFiles(): List<String> {
-        val lutFiles = mutableListOf(LUT_NONE_LABEL)
+    private fun launchImportLutPicker() {
+        importLutLauncher.launch(arrayOf("text/plain", "application/octet-stream"))
+    }
+
+    private fun importLutFromUri(uri: Uri) {
+        try {
+            val parsedLut = contentResolver.openInputStream(uri)?.use { LutUtils.loadLut(it) }
+            if (parsedLut == null) {
+                Toast.makeText(this, "Invalid LUT file", Toast.LENGTH_SHORT).show()
+                return
+            }
+
+            val targetFile = copyImportedLutToPrivateStorage(uri) ?: run {
+                Toast.makeText(this, "Failed to import LUT", Toast.LENGTH_SHORT).show()
+                return
+            }
+
+            val storageKey = importedStorageKey(targetFile.name)
+            appSettings.lutName = storageKey
+            currentLut = parsedLut
+            appSettings.save(overlay.getNormalizedPoints())
+            Toast.makeText(this, "Imported LUT applied: ${targetFile.name}", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to import LUT", e)
+            Toast.makeText(this, "Failed to import LUT", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun copyImportedLutToPrivateStorage(uri: Uri): File? {
+        val sourceName = queryDisplayName(uri)
+        val safeName = sanitizeImportedLutName(sourceName) ?: return null
+        val importedDir = ensureImportedLutDir()
+
+        val baseName = safeName.substringBeforeLast('.', safeName)
+        val ext = safeName.substringAfterLast('.', "cube")
+        var duplicateIndex = 0
+        var targetFile = File(importedDir, safeName)
+        while (targetFile.exists()) {
+            duplicateIndex += 1
+            targetFile = File(importedDir, "${baseName}_$duplicateIndex.$ext")
+        }
+
+        val copied = contentResolver.openInputStream(uri)?.use { input ->
+            targetFile.outputStream().use { output ->
+                input.copyTo(output)
+            }
+            true
+        } ?: false
+
+        return if (copied) targetFile else null
+    }
+
+    private fun queryDisplayName(uri: Uri): String? {
+        contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+            val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            if (nameIndex >= 0 && cursor.moveToFirst()) {
+                return cursor.getString(nameIndex)
+            }
+        }
+        return uri.lastPathSegment
+    }
+
+    private fun sanitizeImportedLutName(rawName: String?): String? {
+        val fallback = "untitled_lut_${UUID.randomUUID()}.cube"
+        val normalized = (rawName ?: fallback).substringAfterLast('/').substringAfterLast('\\').trim()
+        val safeBase = normalized.replace(Regex("[^A-Za-z0-9._-]"), "_").ifEmpty { fallback }
+        val withExt = if (safeBase.endsWith(".cube", ignoreCase = true)) safeBase else "$safeBase.cube"
+        val cleaned = withExt
+            .replace(Regex("^\\.+"), "")
+            .replace(Regex("\\.{2,}"), ".")
+            .ifEmpty { fallback }
+
+        return cleaned.takeIf { isSafeImportedFileName(it) }
+    }
+
+    private fun loadAvailableLutOptions(): List<LutOption> {
+        val options = mutableListOf(LutOption(LUT_NONE_KEY, LUT_NONE_LABEL, LutSource.NONE, null))
         try {
             val files = assets.list("luts")
             files
                 ?.filter { it.endsWith(".cube", ignoreCase = true) }
                 ?.sorted()
-                ?.forEach { lutFiles.add(it) }
+                ?.forEach {
+                    options.add(
+                        LutOption(
+                            storageKey = assetStorageKey(it),
+                            displayName = it,
+                            source = LutSource.ASSET,
+                            fileName = it
+                        )
+                    )
+                }
         } catch (e: Exception) {
             Log.e(TAG, "Error listing assets", e)
         }
-        return lutFiles
+
+        val importedFiles = ensureImportedLutDir().listFiles()
+            ?.filter { it.isFile && it.name.endsWith(".cube", ignoreCase = true) }
+            ?.sortedBy { it.name.lowercase() }
+            .orEmpty()
+
+        for (file in importedFiles) {
+            options.add(
+                LutOption(
+                    storageKey = importedStorageKey(file.name),
+                    displayName = "Imported: ${file.name}",
+                    source = LutSource.IMPORTED,
+                    fileName = file.name
+                )
+            )
+        }
+        return options
+    }
+
+    private fun loadLutOption(option: LutOption): Lut3D? {
+        return when (option.source) {
+            LutSource.NONE -> null
+            LutSource.ASSET -> option.fileName?.let { LutUtils.loadLut(this, it) }
+            LutSource.IMPORTED -> {
+                val fileName = option.fileName ?: return null
+                val file = resolveImportedLutFile(fileName) ?: return null
+                if (!file.exists()) return null
+                file.inputStream().use { LutUtils.loadLut(it) }
+            }
+        }
+    }
+
+    private fun loadLutFromStorageKey(storageKey: String): Lut3D? {
+        val option = when {
+            storageKey.startsWith("$LUT_KEY_PREFIX_ASSET:") -> {
+                val fileName = storageKey.removePrefix("$LUT_KEY_PREFIX_ASSET:")
+                LutOption(storageKey, fileName, LutSource.ASSET, fileName)
+            }
+            storageKey.startsWith("$LUT_KEY_PREFIX_IMPORTED:") -> {
+                val fileName = storageKey.removePrefix("$LUT_KEY_PREFIX_IMPORTED:")
+                if (!isSafeImportedFileName(fileName)) return null
+                LutOption(storageKey, "Imported: $fileName", LutSource.IMPORTED, fileName)
+            }
+            else -> {
+                val legacyName = storageKey
+                LutOption(assetStorageKey(legacyName), legacyName, LutSource.ASSET, legacyName)
+            }
+        }
+        return loadLutOption(option)
+    }
+
+    private fun normalizeLutStorageKey(storedValue: String): String {
+        return when {
+            storedValue.startsWith("$LUT_KEY_PREFIX_ASSET:") || storedValue.startsWith("$LUT_KEY_PREFIX_IMPORTED:") -> storedValue
+            else -> assetStorageKey(storedValue)
+        }
+    }
+
+    private fun assetStorageKey(fileName: String): String = "$LUT_KEY_PREFIX_ASSET:$fileName"
+
+    private fun importedStorageKey(fileName: String): String = "$LUT_KEY_PREFIX_IMPORTED:$fileName"
+
+    private fun ensureImportedLutDir(): File {
+        val dir = File(filesDir, IMPORTED_LUT_DIR_NAME)
+        if (!dir.exists()) {
+            dir.mkdirs()
+        }
+        return dir
+    }
+
+    private fun resolveImportedLutFile(fileName: String): File? {
+        if (!isSafeImportedFileName(fileName)) return null
+        return try {
+            val dir = ensureImportedLutDir().canonicalFile
+            val file = File(dir, fileName).canonicalFile
+            if (file.toPath().startsWith(dir.toPath())) file else null
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun isSafeImportedFileName(fileName: String): Boolean {
+        if (fileName.contains('/') || fileName.contains('\\')) return false
+        if (fileName.contains("..")) return false
+        if (fileName.startsWith('.')) return false
+        return fileName.matches(Regex("^[A-Za-z0-9._-]+\\.cube$", RegexOption.IGNORE_CASE))
     }
 
     private fun captureCurrentPreviewBitmap(): Bitmap {
@@ -640,7 +831,11 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "C1Cam"
+        private const val LUT_KEY_PREFIX_ASSET = "asset"
+        private const val LUT_KEY_PREFIX_IMPORTED = "imported"
+        private const val LUT_NONE_KEY = "__none__"
         private const val LUT_NONE_LABEL = "None"
+        private const val IMPORTED_LUT_DIR_NAME = "imported_luts"
         private val REQUIRED_PERMISSIONS = mutableListOf(Manifest.permission.CAMERA).apply {
             if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
                 add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
@@ -648,3 +843,16 @@ class MainActivity : AppCompatActivity() {
         }.toTypedArray()
     }
 }
+
+private enum class LutSource {
+    NONE,
+    ASSET,
+    IMPORTED
+}
+
+private data class LutOption(
+    val storageKey: String,
+    val displayName: String,
+    val source: LutSource,
+    val fileName: String?
+)
