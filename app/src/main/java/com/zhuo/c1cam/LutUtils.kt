@@ -112,50 +112,50 @@ object LutUtils {
 
     fun loadLut(inputStream: InputStream): Lut3D? {
         return try {
-            val reader = BufferedReader(InputStreamReader(inputStream))
             var size = 0
             val dataList = mutableListOf<Float>()
 
-            var line = reader.readLine()
-            while (line != null) {
-                line = line.trim()
-                if (line.isEmpty() || line.startsWith("#")) {
+            BufferedReader(InputStreamReader(inputStream)).use { reader ->
+                var line = reader.readLine()
+                while (line != null) {
+                    line = line.trim()
+                    if (line.isEmpty() || line.startsWith("#")) {
+                        line = reader.readLine()
+                        continue
+                    }
+
+                    val upperLine = line.uppercase()
+
+                    if (upperLine.startsWith("LUT_3D_SIZE")) {
+                        val parts = line.split("\\s+".toRegex())
+                        if (parts.size >= 2) {
+                            try {
+                                size = parts[1].toInt()
+                            } catch (_: Exception) {
+                                // ignore malformed size line
+                            }
+                        }
+                    } else if (upperLine.startsWith("TITLE") || upperLine.startsWith("DOMAIN_") || upperLine.startsWith("LUT_1D_SIZE")) {
+                        // ignore title/domain/1D size keywords
+                    } else {
+                        // Data lines
+                        val parts = line.split("\\s+".toRegex())
+                        if (parts.size >= 3) {
+                            try {
+                                val r = parts[0].toFloat()
+                                val g = parts[1].toFloat()
+                                val b = parts[2].toFloat()
+                                dataList.add(r)
+                                dataList.add(g)
+                                dataList.add(b)
+                            } catch (_: NumberFormatException) {
+                                // Not a data line, ignore
+                            }
+                        }
+                    }
                     line = reader.readLine()
-                    continue
                 }
-
-                val upperLine = line.uppercase()
-
-                if (upperLine.startsWith("LUT_3D_SIZE")) {
-                    val parts = line.split("\\s+".toRegex())
-                    if (parts.size >= 2) {
-                        try {
-                            size = parts[1].toInt()
-                        } catch (_: Exception) {
-                            // ignore malformed size line
-                        }
-                    }
-                } else if (upperLine.startsWith("TITLE") || upperLine.startsWith("DOMAIN_") || upperLine.startsWith("LUT_1D_SIZE")) {
-                    // ignore title/domain/1D size keywords
-                } else {
-                    // Data lines
-                    val parts = line.split("\\s+".toRegex())
-                    if (parts.size >= 3) {
-                        try {
-                            val r = parts[0].toFloat()
-                            val g = parts[1].toFloat()
-                            val b = parts[2].toFloat()
-                            dataList.add(r)
-                            dataList.add(g)
-                            dataList.add(b)
-                        } catch (_: NumberFormatException) {
-                            // Not a data line, ignore
-                        }
-                    }
-                }
-                line = reader.readLine()
             }
-            reader.close()
 
             if (size > 0 && dataList.size == size * size * size * 3) {
                 Lut3D(size, dataList.toFloatArray())

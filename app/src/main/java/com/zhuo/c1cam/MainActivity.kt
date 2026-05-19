@@ -458,7 +458,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun launchImportLutPicker() {
-        importLutLauncher.launch(arrayOf("*/*"))
+        importLutLauncher.launch(arrayOf("text/*", "application/octet-stream"))
     }
 
     private fun importLutFromUri(uri: Uri) {
@@ -487,14 +487,16 @@ class MainActivity : AppCompatActivity() {
 
     private fun copyImportedLutToPrivateStorage(uri: Uri): File? {
         val sourceName = queryDisplayName(uri)
-        val safeName = sanitizeImportedLutName(sourceName)
+        val safeName = sanitizeImportedLutName(sourceName) ?: return null
         val importedDir = ensureImportedLutDir()
 
+        val base = safeName.substringBeforeLast('.', safeName)
+        val ext = safeName.substringAfterLast('.', "cube")
+        var suffix = 0
         var targetFile = File(importedDir, safeName)
-        if (targetFile.exists()) {
-            val base = safeName.substringBeforeLast('.', safeName)
-            val ext = safeName.substringAfterLast('.', "cube")
-            targetFile = File(importedDir, "${base}_${System.currentTimeMillis()}.$ext")
+        while (targetFile.exists()) {
+            suffix += 1
+            targetFile = File(importedDir, "${base}_${System.currentTimeMillis()}_$suffix.$ext")
         }
 
         val copied = contentResolver.openInputStream(uri)?.use { input ->
@@ -517,11 +519,17 @@ class MainActivity : AppCompatActivity() {
         return uri.lastPathSegment
     }
 
-    private fun sanitizeImportedLutName(rawName: String?): String {
+    private fun sanitizeImportedLutName(rawName: String?): String? {
         val fallback = "imported_${System.currentTimeMillis()}.cube"
-        val normalized = (rawName ?: fallback).substringAfterLast('/').substringAfterLast('\\')
-        val safeBase = normalized.replace(Regex("[^A-Za-z0-9._-]"), "_").trim().ifEmpty { fallback }
-        return if (safeBase.endsWith(".cube", ignoreCase = true)) safeBase else "$safeBase.cube"
+        val normalized = (rawName ?: fallback).substringAfterLast('/').substringAfterLast('\\').trim()
+        val safeBase = normalized.replace(Regex("[^A-Za-z0-9._-]"), "_").ifEmpty { fallback }
+        val withExt = if (safeBase.endsWith(".cube", ignoreCase = true)) safeBase else "$safeBase.cube"
+        val cleaned = withExt
+            .replace(Regex("^\\.+"), "")
+            .replace("..", ".")
+            .ifEmpty { fallback }
+
+        return cleaned.takeIf { isSafeImportedFileName(it) }
     }
 
     private fun loadAvailableLutOptions(): List<LutOption> {
@@ -616,7 +624,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun isSafeImportedFileName(fileName: String): Boolean {
         if (fileName.contains('/') || fileName.contains('\\')) return false
-        return fileName.endsWith(".cube", ignoreCase = true)
+        if (fileName.contains("..")) return false
+        if (fileName.startsWith('.')) return false
+        return fileName.matches(Regex("^[A-Za-z0-9][A-Za-z0-9._-]*\\.cube$", RegexOption.IGNORE_CASE))
     }
 
     private fun captureCurrentPreviewBitmap(): Bitmap {
