@@ -490,13 +490,13 @@ class MainActivity : AppCompatActivity() {
         val safeName = sanitizeImportedLutName(sourceName) ?: return null
         val importedDir = ensureImportedLutDir()
 
-        val base = safeName.substringBeforeLast('.', safeName)
+        val baseName = safeName.substringBeforeLast('.', safeName)
         val ext = safeName.substringAfterLast('.', "cube")
         var suffix = 0
         var targetFile = File(importedDir, safeName)
         while (targetFile.exists()) {
             suffix += 1
-            targetFile = File(importedDir, "${base}_${System.currentTimeMillis()}_$suffix.$ext")
+            targetFile = File(importedDir, "${baseName}_${System.currentTimeMillis()}_$suffix.$ext")
         }
 
         val copied = contentResolver.openInputStream(uri)?.use { input ->
@@ -526,7 +526,7 @@ class MainActivity : AppCompatActivity() {
         val withExt = if (safeBase.endsWith(".cube", ignoreCase = true)) safeBase else "$safeBase.cube"
         val cleaned = withExt
             .replace(Regex("^\\.+"), "")
-            .replace("..", ".")
+            .replace(Regex("\\.{2,}"), ".")
             .ifEmpty { fallback }
 
         return cleaned.takeIf { isSafeImportedFileName(it) }
@@ -626,7 +626,7 @@ class MainActivity : AppCompatActivity() {
         if (fileName.contains('/') || fileName.contains('\\')) return false
         if (fileName.contains("..")) return false
         if (fileName.startsWith('.')) return false
-        return fileName.matches(Regex("^[A-Za-z0-9][A-Za-z0-9._-]*\\.cube$", RegexOption.IGNORE_CASE))
+        return fileName.matches(Regex("^(?!.*\\.\\.)[A-Za-z0-9][A-Za-z0-9._-]*\\.cube$", RegexOption.IGNORE_CASE))
     }
 
     private fun captureCurrentPreviewBitmap(): Bitmap {
