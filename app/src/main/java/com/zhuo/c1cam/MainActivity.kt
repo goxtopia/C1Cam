@@ -369,6 +369,9 @@ class MainActivity : AppCompatActivity() {
         var previewRequestId = 0
         var committed = false
         var dialogClosed = false
+        fun selectedOptionForKey(key: String?): LutOption {
+            return lutOptions.firstOrNull { it.storageKey == (key ?: LUT_NONE_KEY) } ?: lutOptions.first()
+        }
 
         fun renderPreview(option: LutOption, lut: Lut3D?) {
             previewName.text = "Current: ${option.displayName}"
@@ -416,8 +419,7 @@ class MainActivity : AppCompatActivity() {
 
             // Apply instantly so the camera preview updates in real time.
             currentLut = selectedLut
-            val selectedOption = lutOptions.firstOrNull { it.storageKey == (selectedLutKey ?: LUT_NONE_KEY) } ?: lutOptions.first()
-            renderPreview(selectedOption, selectedLut)
+            renderPreview(selectedOptionForKey(selectedLutKey), selectedLut)
         }
 
         lutList.setOnItemClickListener { _, _, position, _ ->
@@ -434,7 +436,7 @@ class MainActivity : AppCompatActivity() {
                 appSettings.lutName = selectedLutKey
                 currentLut = selectedLut
                 appSettings.save(overlay.getNormalizedPoints())
-                val selectedOption = lutOptions.firstOrNull { it.storageKey == (selectedLutKey ?: LUT_NONE_KEY) } ?: lutOptions.first()
+                val selectedOption = selectedOptionForKey(selectedLutKey)
                 val message = if (selectedLutKey == null) {
                     "LUT cleared"
                 } else {
@@ -492,11 +494,11 @@ class MainActivity : AppCompatActivity() {
 
         val baseName = safeName.substringBeforeLast('.', safeName)
         val ext = safeName.substringAfterLast('.', "cube")
-        var suffix = 0
+        var duplicateIndex = 0
         var targetFile = File(importedDir, safeName)
         while (targetFile.exists()) {
-            suffix += 1
-            targetFile = File(importedDir, "${baseName}_${System.currentTimeMillis()}_$suffix.$ext")
+            duplicateIndex += 1
+            targetFile = File(importedDir, "${baseName}_${System.currentTimeMillis()}_$duplicateIndex.$ext")
         }
 
         val copied = contentResolver.openInputStream(uri)?.use { input ->
@@ -626,7 +628,7 @@ class MainActivity : AppCompatActivity() {
         if (fileName.contains('/') || fileName.contains('\\')) return false
         if (fileName.contains("..")) return false
         if (fileName.startsWith('.')) return false
-        return fileName.matches(Regex("^(?!.*\\.\\.)[A-Za-z0-9][A-Za-z0-9._-]*\\.cube$", RegexOption.IGNORE_CASE))
+        return fileName.matches(Regex("^[A-Za-z0-9][A-Za-z0-9._-]*\\.cube$", RegexOption.IGNORE_CASE))
     }
 
     private fun captureCurrentPreviewBitmap(): Bitmap {
