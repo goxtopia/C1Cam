@@ -12,6 +12,7 @@ import android.opengl.GLES30
 import android.opengl.GLUtils
 import android.util.Log
 import java.io.BufferedReader
+import java.io.InputStream
 import java.io.InputStreamReader
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -99,8 +100,18 @@ object LutUtils {
     private var glDisabled = false
 
     fun loadLut(context: Context, filename: String): Lut3D? {
-        try {
-            val inputStream = context.assets.open("luts/$filename")
+        return try {
+            context.assets.open("luts/$filename").use { input ->
+                loadLut(input)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+
+    fun loadLut(inputStream: InputStream): Lut3D? {
+        return try {
             val reader = BufferedReader(InputStreamReader(inputStream))
             var size = 0
             val dataList = mutableListOf<Float>()
@@ -118,11 +129,11 @@ object LutUtils {
                 if (upperLine.startsWith("LUT_3D_SIZE")) {
                     val parts = line.split("\\s+".toRegex())
                     if (parts.size >= 2) {
-                         try {
-                             size = parts[1].toInt()
-                         } catch (e: Exception) {
-                             // ignore malformed size line
-                         }
+                        try {
+                            size = parts[1].toInt()
+                        } catch (_: Exception) {
+                            // ignore malformed size line
+                        }
                     }
                 } else if (upperLine.startsWith("TITLE") || upperLine.startsWith("DOMAIN_") || upperLine.startsWith("LUT_1D_SIZE")) {
                     // ignore title/domain/1D size keywords
@@ -137,7 +148,7 @@ object LutUtils {
                             dataList.add(r)
                             dataList.add(g)
                             dataList.add(b)
-                        } catch (e: NumberFormatException) {
+                        } catch (_: NumberFormatException) {
                             // Not a data line, ignore
                         }
                     }
@@ -147,12 +158,14 @@ object LutUtils {
             reader.close()
 
             if (size > 0 && dataList.size == size * size * size * 3) {
-                return Lut3D(size, dataList.toFloatArray())
+                Lut3D(size, dataList.toFloatArray())
+            } else {
+                null
             }
         } catch (e: Exception) {
             e.printStackTrace()
+            null
         }
-        return null
     }
 
     fun applyLut(bitmap: Bitmap, lut: Lut3D, destBitmap: Bitmap? = null): Bitmap {
