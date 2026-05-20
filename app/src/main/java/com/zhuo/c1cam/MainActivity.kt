@@ -43,6 +43,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var overlay: OverlayView
     private lateinit var previewRectified: ImageView
     private lateinit var focusSlider: Slider
+    private lateinit var focusModeButton: Button
+    private lateinit var aeLockButton: Button
+    private lateinit var afLockButton: Button
     private lateinit var evSlider: Slider
     private lateinit var captureButton: com.google.android.material.floatingactionbutton.FloatingActionButton
     private lateinit var settingsButton: Button
@@ -101,6 +104,9 @@ class MainActivity : AppCompatActivity() {
         overlay = findViewById(R.id.overlay)
         previewRectified = findViewById(R.id.preview_rectified)
         focusSlider = findViewById(R.id.focus_slider)
+        focusModeButton = findViewById(R.id.focus_mode_button)
+        aeLockButton = findViewById(R.id.ae_lock_button)
+        afLockButton = findViewById(R.id.af_lock_button)
         evSlider = findViewById(R.id.ev_slider)
         captureButton = findViewById(R.id.capture_button)
         settingsButton = findViewById(R.id.settings_button)
@@ -139,6 +145,8 @@ class MainActivity : AppCompatActivity() {
 
         // Restore UI values
         focusSlider.value = appSettings.focusVal
+        updateFocusModeUi()
+        updateLockButtonsUi()
         evSlider.value = appSettings.evVal
         if (appSettings.savedPoints != null) {
             overlay.setNormalizedPoints(appSettings.savedPoints!!)
@@ -149,8 +157,38 @@ class MainActivity : AppCompatActivity() {
         focusSlider.addOnChangeListener { _, value, fromUser ->
             if (fromUser) {
                 appSettings.focusVal = value
-                cameraManager.setFocusDistance(value)
+                if (appSettings.focusMode == FocusMode.MANUAL) {
+                    cameraManager.setFocusDistance(value)
+                }
             }
+        }
+
+        focusModeButton.setOnClickListener {
+            appSettings.focusMode = appSettings.focusMode.toggled()
+            if (appSettings.focusMode == FocusMode.MANUAL) {
+                appSettings.isAfLocked = false
+            }
+            updateFocusModeUi()
+            updateLockButtonsUi()
+            cameraManager.applyFocusMode()
+            appSettings.save(overlay.getNormalizedPoints())
+        }
+
+        aeLockButton.setOnClickListener {
+            val locked = !appSettings.isAeLocked
+            cameraManager.setAeLocked(locked)
+            updateLockButtonsUi()
+            appSettings.save(overlay.getNormalizedPoints())
+        }
+
+        afLockButton.setOnClickListener {
+            if (appSettings.focusMode != FocusMode.AUTO) {
+                return@setOnClickListener
+            }
+            val locked = !appSettings.isAfLocked
+            cameraManager.setAfLocked(locked)
+            updateLockButtonsUi()
+            appSettings.save(overlay.getNormalizedPoints())
         }
 
         evSlider.addOnChangeListener { _, value, fromUser ->
@@ -182,6 +220,18 @@ class MainActivity : AppCompatActivity() {
 
         overlay.onDoubleTapListener = {
             toggleFullscreen()
+        }
+        overlay.onSingleTapListener = { x, y ->
+            if (FocusModeUiModel.isTapToFocusEnabled(appSettings.focusMode, appSettings.isTapToFocusEnabled)) {
+                overlay.showFocusIndicator(x, y, Color.WHITE)
+                cameraManager.focusOnPoint(x, y) { success ->
+                    overlay.showFocusIndicator(
+                        x,
+                        y,
+                        if (success) Color.parseColor("#66FF66") else Color.parseColor("#FF6B6B")
+                    )
+                }
+            }
         }
 
         settingsButton.setOnClickListener {
@@ -224,6 +274,21 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
+    private fun updateFocusModeUi() {
+        focusModeButton.text = FocusModeUiModel.buttonLabel(appSettings.focusMode)
+        focusSlider.isEnabled = FocusModeUiModel.isFocusSliderEnabled(appSettings.focusMode)
+        focusSlider.alpha = if (focusSlider.isEnabled) 1f else 0.4f
+    }
+
+    private fun updateLockButtonsUi() {
+        aeLockButton.text = if (appSettings.isAeLocked) "AE•" else "AE"
+        afLockButton.text = if (appSettings.isAfLocked) "AF•" else "AF"
+        aeLockButton.alpha = if (appSettings.isAeLocked) 1f else 0.72f
+        afLockButton.alpha = if (appSettings.isAfLocked) 1f else 0.72f
+        afLockButton.isEnabled = appSettings.focusMode == FocusMode.AUTO
+        afLockButton.alpha = if (appSettings.focusMode != FocusMode.AUTO) 0.35f else if (appSettings.isAfLocked) 1f else 0.72f
+    }
+
     private fun showFocalLengthDialog() {
         val options = arrayOf("24mm (1x)", "28mm (1.17x)", "35mm (1.46x)", "40mm (1.67x)", "50mm (2.08x)")
         val values = intArrayOf(24, 28, 35, 40, 50)
@@ -251,8 +316,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showAdvancedSettingsDialog() {
-        val options = arrayOf("Sports Mode", "Disable Noise Reduction", "Disable Edge Sharpening", "Chroma Noise Reduction", "Disable Crop Mode", "WDR Mode")
-        val checkedItems = booleanArrayOf(appSettings.isSportsMode, appSettings.isNoiseReductionOff, appSettings.isEdgeModeOff, appSettings.isChromaDenoiseOn, appSettings.isCropModeOff, appSettings.isWdrMode)
+        val options = arrayOf("Sports Mode", "Disable Noise Reduction", "Disable Edge Sharpening", "Chroma Noise Reduction", "Disable Crop Mode", "WDR Mode", "Enable Tap to Focus")
+        val checkedItems = booleanArrayOf(appSettings.isSportsMode, appSettings.isNoiseReductionOff, appSettings.isEdgeModeOff, appSettings.isChromaDenoiseOn, appSettings.isCropModeOff, appSettings.isWdrMode, appSettings.isTapToFocusEnabled)
 
         MaterialAlertDialogBuilder(this)
             .setTitle("Advanced Settings")
@@ -264,14 +329,14 @@ class MainActivity : AppCompatActivity() {
                     3 -> appSettings.isChromaDenoiseOn = isChecked
                     4 -> appSettings.isCropModeOff = isChecked
                     5 -> appSettings.isWdrMode = isChecked
+                    6 -> appSettings.isTapToFocusEnabled = isChecked
                 }
             }
             .setPositiveButton("OK") { _, _ ->
                 appSettings.save(overlay.getNormalizedPoints())
                 cameraManager.updateCameraSettings()
                 overlay.isOverlayVisible = !appSettings.isCropModeOff
-                // Re-apply manual focus in case mode changed
-                cameraManager.setFocusDistance(focusSlider.value)
+                cameraManager.applyFocusMode()
             }
             .setNegativeButton("Cancel", null)
             .show()

@@ -9,6 +9,10 @@ class AppSettings(private val context: Context) {
 
     var targetAspectRatio: Float = 1.414f
     var focusVal: Float = 0.0f
+    var focusMode: FocusMode = FocusMode.MANUAL
+    var isAeLocked: Boolean = false
+    var isAfLocked: Boolean = false
+    var isTapToFocusEnabled: Boolean = false
     var evVal: Float = 0.0f
     var lutName: String? = null
     var isSportsMode = false
@@ -27,6 +31,10 @@ class AppSettings(private val context: Context) {
     fun load() {
         targetAspectRatio = prefs.getFloat(KEY_ASPECT_RATIO, 1.414f)
         focusVal = prefs.getFloat(KEY_FOCUS_VAL, 0.0f)
+        focusMode = FocusMode.fromStorageValue(prefs.getString(KEY_FOCUS_MODE, FocusMode.MANUAL.storageValue))
+        isAeLocked = prefs.getBoolean(KEY_AE_LOCK, false)
+        isAfLocked = prefs.getBoolean(KEY_AF_LOCK, false)
+        isTapToFocusEnabled = prefs.getBoolean(KEY_TAP_TO_FOCUS, false)
         evVal = prefs.getFloat(KEY_EV_VAL, 0.0f)
         lutName = prefs.getString(KEY_LUT_NAME, null)
         isSportsMode = prefs.getBoolean(KEY_SPORTS_MODE, false)
@@ -58,6 +66,10 @@ class AppSettings(private val context: Context) {
         val editor = prefs.edit()
         editor.putFloat(KEY_ASPECT_RATIO, targetAspectRatio)
         editor.putFloat(KEY_FOCUS_VAL, focusVal)
+        editor.putString(KEY_FOCUS_MODE, focusMode.storageValue)
+        editor.putBoolean(KEY_AE_LOCK, isAeLocked)
+        editor.putBoolean(KEY_AF_LOCK, isAfLocked)
+        editor.putBoolean(KEY_TAP_TO_FOCUS, isTapToFocusEnabled)
         editor.putFloat(KEY_EV_VAL, evVal)
         editor.putString(KEY_LUT_NAME, lutName)
         editor.putBoolean(KEY_SPORTS_MODE, isSportsMode)
@@ -84,6 +96,10 @@ class AppSettings(private val context: Context) {
         private const val PREFS_NAME = "C1CamPrefs"
         private const val KEY_ASPECT_RATIO = "aspect_ratio"
         private const val KEY_FOCUS_VAL = "focus_val"
+        private const val KEY_FOCUS_MODE = "focus_mode"
+        private const val KEY_AE_LOCK = "ae_lock"
+        private const val KEY_AF_LOCK = "af_lock"
+        private const val KEY_TAP_TO_FOCUS = "tap_to_focus"
         private const val KEY_EV_VAL = "ev_val"
         private const val KEY_POINTS = "points"
         private const val KEY_LUT_NAME = "lut_name"

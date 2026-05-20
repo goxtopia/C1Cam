@@ -210,21 +210,11 @@
                 android:gravity="center_vertical"
                 android:orientation="horizontal">
 
-                <TextView
-                    android:layout_width="32dp"
-                    android:layout_height="28dp"
-                    android:background="@drawable/bg_edit_toggle"
-                    android:gravity="center"
-                    android:text="AF"
-                    android:textColor="@color/cam_text_primary"
-                    android:textStyle="bold"
-                    android:textSize="11sp" />
-
                 <com.google.android.material.slider.Slider
                     android:id="@+id/focus_slider"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="10dp"
+                    android:layout_marginEnd="8dp"
                     android:layout_weight="1"
                     android:valueFrom="0.0"
                     android:valueTo="1.0"
@@ -232,6 +222,53 @@
                     app:thumbColor="@color/cam_accent"
                     app:trackColorActive="@color/cam_accent"
                     app:trackColorInactive="#50FFFFFF" />
+
+                <Button
+                    android:id="@+id/focus_mode_button"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="44dp"
+                    android:layout_height="36dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:paddingStart="0dp"
+                    android:paddingEnd="0dp"
+                    android:text="MF"
+                    android:textSize="11sp"
+                    android:textColor="@color/cam_text_primary"
+                    app:strokeColor="@color/cam_accent"
+                    app:iconTint="@color/cam_text_primary" />
+
+                <Button
+                    android:id="@+id/ae_lock_button"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="40dp"
+                    android:layout_height="36dp"
+                    android:layout_marginStart="6dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:paddingStart="0dp"
+                    android:paddingEnd="0dp"
+                    android:text="AE"
+                    android:textSize="11sp"
+                    android:textColor="@color/cam_text_primary"
+                    app:strokeColor="@color/cam_accent"
+                    app:iconTint="@color/cam_text_primary" />
+
+                <Button
+                    android:id="@+id/af_lock_button"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="40dp"
+                    android:layout_height="36dp"
+                    android:layout_marginStart="6dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:paddingStart="0dp"
+                    android:paddingEnd="0dp"
+                    android:text="AF"
+                    android:textSize="11sp"
+                    android:textColor="@color/cam_text_primary"
+                    app:strokeColor="@color/cam_accent"
+                    app:iconTint="@color/cam_text_primary" />
             </LinearLayout>
         </LinearLayout>
 
