@@ -8,6 +8,7 @@ import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.CaptureResult
 import android.hardware.camera2.TotalCaptureResult
 import android.util.Log
+import android.util.Size
 import android.widget.ImageView
 import android.widget.Toast
 import androidx.annotation.OptIn
@@ -26,6 +27,9 @@ import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.MeteringPointFactory
 import androidx.camera.core.Preview
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
+import androidx.camera.core.resolutionselector.ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
@@ -53,6 +57,9 @@ class CameraManager(
     private var latestTapToFocusRequestId: Long = 0L
     private var latestAutoFocusDistanceDiopter: Float? = null
     private var pendingAfLockAfterFocus = false
+    private var analysisFrameCounter: Long = 0L
+    @Volatile
+    private var latestPreviewSourceAspectRatio: Float = 3f / 4f
     val cameraExecutor: ExecutorService = Executors.newSingleThreadExecutor()
 
     fun startCamera() {
@@ -73,14 +80,22 @@ class CameraManager(
                 .setBufferFormat(ImageFormat.YUV_420_888)
                 .build()
 
-            // Optimized: Set target resolution to reduce processing load for preview analysis
-            // 720p is sufficient for the on-screen preview overlay
-            imageAnalysis = ImageAnalysis.Builder()
-                .setTargetResolution(android.util.Size(1280, 720))
-                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                .build()
+            val previewAnalysisPolicy = PreviewAnalysisPolicy.forMode(appSettings.previewDisplayMode)
+            imageAnalysis = createImageAnalysis(previewAnalysisPolicy)
+            analysisFrameCounter = 0L
 
             imageAnalysis?.setAnalyzer(cameraExecutor) { imageProxy ->
+                val frameIndex = ++analysisFrameCounter
+                latestPreviewSourceAspectRatio = PreviewFrameAspectRatioModel.fromFrame(
+                    width = imageProxy.width,
+                    height = imageProxy.height,
+                    rotationDegrees = imageProxy.imageInfo.rotationDegrees
+                )
+                if (!previewAnalysisPolicy.shouldProcessFrame(frameIndex)) {
+                    imageProxy.close()
+                    return@setAnalyzer
+                }
+
                 val points = overlay.getNormalizedPoints()
                 val viewW = viewFinder.width
                 val viewH = viewFinder.height
@@ -99,7 +114,9 @@ class CameraManager(
                     )
 
                     activity.runOnUiThread {
-                        previewRectified.setImageBitmap(finalPreview)
+                        if (appSettings.previewDisplayMode == PreviewDisplayMode.RECTIFIED) {
+                            previewRectified.setImageBitmap(finalPreview)
+                        }
                     }
                 }
 
@@ -125,6 +142,12 @@ class CameraManager(
 
         }, ContextCompat.getMainExecutor(activity))
     }
+
+    fun updatePreviewAnalysisMode() {
+        startCamera()
+    }
+
+    fun getLatestPreviewSourceAspectRatio(): Float = latestPreviewSourceAspectRatio
 
     fun takePhoto() {
         val capture = imageCapture ?: return
@@ -164,6 +187,26 @@ class CameraManager(
                 }
             }
         )
+    }
+
+    private fun createImageAnalysis(policy: PreviewAnalysisPolicy): ImageAnalysis {
+        val resolutionStrategy = if (policy.useHighestAvailableResolution) {
+            ResolutionStrategy.HIGHEST_AVAILABLE_STRATEGY
+        } else {
+            ResolutionStrategy(
+                Size(policy.analysisWidth, policy.analysisHeight),
+                FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
+            )
+        }
+
+        return ImageAnalysis.Builder()
+            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+            .setResolutionSelector(
+                ResolutionSelector.Builder()
+                    .setResolutionStrategy(resolutionStrategy)
+                    .build()
+            )
+            .build()
     }
 
     @OptIn(ExperimentalCamera2Interop::class)

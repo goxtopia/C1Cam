@@ -3,9 +3,11 @@ package com.zhuo.c1cam
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.CornerPathEffect
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PointF
+import android.graphics.RectF
 import android.os.SystemClock
 import android.util.AttributeSet
 import android.view.GestureDetector
@@ -57,10 +59,27 @@ class OverlayView @JvmOverloads constructor(
     }
 
     private val path = Path()
+    private val cropFrameRect = RectF()
+    private val cropFramePath = Path()
+    private val cropFrameCornerPath = Path()
     private val focusIndicatorPaint = Paint().apply {
         color = Color.WHITE
         style = Paint.Style.STROKE
         strokeWidth = 4f
+        isAntiAlias = true
+    }
+    private val cropFramePaint = Paint().apply {
+        color = Color.argb(230, 245, 245, 235)
+        style = Paint.Style.STROKE
+        strokeWidth = 3f
+        isAntiAlias = true
+        pathEffect = CornerPathEffect(6f)
+    }
+    private val cropFrameCornerPaint = Paint().apply {
+        color = Color.argb(255, 255, 250, 240)
+        style = Paint.Style.STROKE
+        strokeWidth = 6f
+        strokeCap = Paint.Cap.SQUARE
         isAntiAlias = true
     }
 
@@ -80,6 +99,18 @@ class OverlayView @JvmOverloads constructor(
         }
 
     var isOverlayVisible = true
+        set(value) {
+            field = value
+            invalidate()
+        }
+
+    var isCropFrameGuideVisible = false
+        set(value) {
+            field = value
+            invalidate()
+        }
+
+    var cropFrameGuideRect: CropFrameGuideRect? = null
         set(value) {
             field = value
             invalidate()
@@ -110,6 +141,10 @@ class OverlayView @JvmOverloads constructor(
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+        if (isCropFrameGuideVisible) {
+            drawCropFrameGuide(canvas)
+        }
+
         if (isOverlayVisible && isInitialized && points.size == 4) {
             path.rewind()
             path.moveTo(points[0].x, points[0].y)
@@ -132,6 +167,50 @@ class OverlayView @JvmOverloads constructor(
         }
 
         drawFocusIndicator(canvas)
+    }
+
+    private fun drawCropFrameGuide(canvas: Canvas) {
+        val rect = cropFrameGuideRect ?: return
+        if (width <= 0 || height <= 0) return
+
+        cropFrameRect.set(
+            rect.left.coerceIn(0f, 1f) * width,
+            rect.top.coerceIn(0f, 1f) * height,
+            rect.right.coerceIn(0f, 1f) * width,
+            rect.bottom.coerceIn(0f, 1f) * height
+        )
+
+        if (cropFrameRect.width() <= 1f || cropFrameRect.height() <= 1f) return
+
+        cropFramePath.rewind()
+        cropFramePath.addRect(cropFrameRect, Path.Direction.CW)
+        canvas.drawPath(cropFramePath, cropFramePaint)
+
+        val cornerLength = minOf(cropFrameRect.width(), cropFrameRect.height()) * 0.12f
+            .coerceAtLeast(24f)
+            .coerceAtMost(72f)
+
+        cropFrameCornerPath.rewind()
+        addCornerMarks(cropFrameCornerPath, cropFrameRect, cornerLength)
+        canvas.drawPath(cropFrameCornerPath, cropFrameCornerPaint)
+    }
+
+    private fun addCornerMarks(path: Path, rect: RectF, length: Float) {
+        path.moveTo(rect.left, rect.top + length)
+        path.lineTo(rect.left, rect.top)
+        path.lineTo(rect.left + length, rect.top)
+
+        path.moveTo(rect.right - length, rect.top)
+        path.lineTo(rect.right, rect.top)
+        path.lineTo(rect.right, rect.top + length)
+
+        path.moveTo(rect.right, rect.bottom - length)
+        path.lineTo(rect.right, rect.bottom)
+        path.lineTo(rect.right - length, rect.bottom)
+
+        path.moveTo(rect.left + length, rect.bottom)
+        path.lineTo(rect.left, rect.bottom)
+        path.lineTo(rect.left, rect.bottom - length)
     }
 
     private fun drawFocusIndicator(canvas: Canvas) {

@@ -135,7 +135,7 @@ class ImageProcessor(private val context: Context) {
             val cropRect = getCropRectForNoCropMode(uprightBmp.width, uprightBmp.height, focalLength, noCropAspectRatio)
 
             // 3. Scale down logic
-            val maxDim = 512
+            val maxDim = PREVIEW_MAX_DIMENSION
             val scale = if (max(cropRect.width(), cropRect.height()) > maxDim) {
                 maxDim.toFloat() / max(cropRect.width(), cropRect.height())
             } else 1f
@@ -161,7 +161,12 @@ class ImageProcessor(private val context: Context) {
             val mappedPoints = mapPointsToImage(normalizedViewPoints, uprightBmp.width, uprightBmp.height, viewW, viewH)
 
             // Calculate target dimensions
-            val dims = RectificationUtils.getRectifiedDimensions(uprightBmp, mappedPoints, targetAspectRatio, maxDimension = 512)
+            val dims = RectificationUtils.getRectifiedDimensions(
+                uprightBmp,
+                mappedPoints,
+                targetAspectRatio,
+                maxDimension = PREVIEW_MAX_DIMENSION
+            )
             val dstW = dims[0]
             val dstH = dims[1]
 
@@ -307,6 +312,7 @@ class ImageProcessor(private val context: Context) {
     }
 
     companion object {
+        private const val PREVIEW_MAX_DIMENSION = 1920
         private const val FILENAME_FORMAT = "yyyy-MM-dd-HH-mm-ss-SSS"
     }
 }

@@ -21,7 +21,7 @@
         app:layout_constraintBottom_toTopOf="@id/bottom_controls"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
-        
+
         <FrameLayout
             android:id="@+id/camera_container"
             android:layout_width="match_parent"
@@ -39,60 +39,14 @@
                 android:layout_height="match_parent" />
 
         </FrameLayout>
-    </FrameLayout>
 
-    <!-- Picture-in-Picture View Container -->
-    <com.google.android.material.card.MaterialCardView
-        android:id="@+id/pip_view_container"
-        android:layout_width="132dp"
-        android:layout_height="176dp"
-        android:layout_marginStart="12dp"
-        android:layout_marginBottom="12dp"
-        app:cardCornerRadius="18dp"
-        app:cardElevation="10dp"
-        app:cardBackgroundColor="#CC101826"
-        app:strokeColor="#60FFFFFF"
-        app:strokeWidth="1dp"
-        app:layout_constraintBottom_toTopOf="@id/bottom_controls"
-        app:layout_constraintStart_toStartOf="parent"
-        android:clickable="true"
-        android:focusable="true"
-        android:foreground="?android:attr/selectableItemBackground">
-        
-        <!-- We use an inner frame so we can swap children easily without dealing with CardView specifics -->
-        <FrameLayout
-            android:id="@+id/pip_frame"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent">
-
-            <ImageView
-                android:id="@+id/preview_rectified"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:scaleType="fitCenter" />
-                
-        </FrameLayout>
-
-        <!-- Dedicated touch interceptor to prevent children from stealing clicks -->
-        <View
-            android:id="@+id/pip_touch_blocker"
+        <ImageView
+            android:id="@+id/preview_rectified"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:clickable="true"
-            android:focusable="true"
-            android:background="@android:color/transparent" />
-        
-        <ImageView
-            android:layout_width="24dp"
-            android:layout_height="24dp"
-            android:layout_gravity="top|end"
-            android:layout_margin="8dp"
-            android:background="@drawable/bg_pip_badge"
-            android:padding="4dp"
-            android:src="@android:drawable/ic_menu_revert"
-            app:tint="@color/cam_text_primary" />
-
-    </com.google.android.material.card.MaterialCardView>
+            android:scaleType="fitCenter"
+            android:visibility="gone" />
+    </FrameLayout>
 
     <!-- Top Controls -->
     <LinearLayout
@@ -131,6 +85,25 @@
             app:iconGravity="textStart"
             app:iconPadding="0dp"
             app:iconTint="@color/cam_text_primary"
+            app:strokeWidth="0dp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/preview_display_toggle"
+            style="@style/Widget.Material3.Button.IconButton.Outlined"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:layout_marginEnd="8dp"
+            android:background="@drawable/bg_top_chip"
+            android:contentDescription="Toggle preview display"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:minWidth="0dp"
+            android:minHeight="0dp"
+            android:padding="0dp"
+            android:text="LUT"
+            android:textAllCaps="false"
+            android:textColor="@color/cam_text_primary"
+            android:textSize="11sp"
             app:strokeWidth="0dp" />
 
         <com.google.android.material.button.MaterialButton

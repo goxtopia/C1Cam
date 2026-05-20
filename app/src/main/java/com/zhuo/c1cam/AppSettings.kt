@@ -23,6 +23,8 @@ class AppSettings(private val context: Context) {
     var isWdrMode = false
     var focalLength: Int = 24
     var noCropAspectRatio: Float = 0f
+    var previewDisplayMode: PreviewDisplayMode = PreviewDisplayMode.CAMERA
+    var isCropFrameGuideVisible: Boolean = false
     var savedPoints: List<PointF>? = null
 
     init {
@@ -46,6 +48,10 @@ class AppSettings(private val context: Context) {
         isWdrMode = prefs.getBoolean(KEY_WDR_MODE, false)
         focalLength = prefs.getInt(KEY_FOCAL_LENGTH, 24)
         noCropAspectRatio = prefs.getFloat(KEY_NO_CROP_ASPECT_RATIO, 0f)
+        previewDisplayMode = PreviewDisplayMode.fromStorageValue(
+            prefs.getString(KEY_PREVIEW_DISPLAY_MODE, PreviewDisplayMode.CAMERA.storageValue)
+        )
+        isCropFrameGuideVisible = prefs.getBoolean(KEY_CROP_FRAME_GUIDE_VISIBLE, false)
 
         val pointsStr = prefs.getString(KEY_POINTS, null)
         if (pointsStr != null) {
@@ -82,6 +88,8 @@ class AppSettings(private val context: Context) {
         editor.putBoolean(KEY_WDR_MODE, isWdrMode)
         editor.putInt(KEY_FOCAL_LENGTH, focalLength)
         editor.putFloat(KEY_NO_CROP_ASPECT_RATIO, noCropAspectRatio)
+        editor.putString(KEY_PREVIEW_DISPLAY_MODE, previewDisplayMode.storageValue)
+        editor.putBoolean(KEY_CROP_FRAME_GUIDE_VISIBLE, isCropFrameGuideVisible)
 
         if (currentPoints.size == 4) {
             val sb = StringBuilder()
@@ -114,5 +122,7 @@ class AppSettings(private val context: Context) {
         private const val KEY_WDR_MODE = "wdr_mode"
         private const val KEY_FOCAL_LENGTH = "focal_length"
         private const val KEY_NO_CROP_ASPECT_RATIO = "no_crop_aspect_ratio"
+        private const val KEY_PREVIEW_DISPLAY_MODE = "preview_display_mode"
+        private const val KEY_CROP_FRAME_GUIDE_VISIBLE = "crop_frame_guide_visible"
     }
 }

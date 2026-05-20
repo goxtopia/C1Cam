@@ -13,6 +13,7 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.OpenableColumns
 import android.util.Log
+import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.View
 import android.widget.ArrayAdapter
@@ -48,13 +49,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var evSlider: Slider
     private lateinit var captureButton: com.google.android.material.floatingactionbutton.FloatingActionButton
     private lateinit var settingsButton: com.google.android.material.button.MaterialButton
+    private lateinit var previewDisplayToggle: com.google.android.material.button.MaterialButton
     private lateinit var editModeToggle: com.google.android.material.button.MaterialButton
     private lateinit var topControls: View
     private lateinit var bottomControls: View
     private lateinit var mainViewContainer: android.widget.FrameLayout
-    private lateinit var pipFrame: android.widget.FrameLayout
-    private lateinit var pipViewContainer: androidx.cardview.widget.CardView
-    private lateinit var pipTouchBlocker: View
     private lateinit var cameraContainer: View
 
     private var isFullscreen = false
@@ -109,14 +108,12 @@ class MainActivity : AppCompatActivity() {
         evSlider = findViewById(R.id.ev_slider)
         captureButton = findViewById(R.id.capture_button)
         settingsButton = findViewById(R.id.settings_button)
+        previewDisplayToggle = findViewById(R.id.preview_display_toggle)
         editModeToggle = findViewById(R.id.edit_mode_toggle)
         topControls = findViewById(R.id.top_controls)
         bottomControls = findViewById(R.id.bottom_controls)
         cameraContainer = findViewById(R.id.camera_container)
         mainViewContainer = findViewById(R.id.main_view_container)
-        pipFrame = findViewById(R.id.pip_frame)
-        pipViewContainer = findViewById(R.id.pip_view_container)
-        pipTouchBlocker = findViewById(R.id.pip_touch_blocker)
 
         appSettings = AppSettings(this)
         imageProcessor = ImageProcessor(this)
@@ -146,7 +143,9 @@ class MainActivity : AppCompatActivity() {
         focusSlider.value = appSettings.focusVal
         updateFocusModeUi()
         updateLockButtonsUi()
+        updatePreviewDisplayUi()
         updateEditModeButtonUi()
+        applyPreviewDisplayMode(shouldSave = false)
         evSlider.value = appSettings.evVal
         if (appSettings.savedPoints != null) {
             overlay.setNormalizedPoints(appSettings.savedPoints!!)
@@ -201,24 +200,32 @@ class MainActivity : AppCompatActivity() {
         editModeToggle.setOnClickListener {
             val isChecked = !overlay.isEditMode
             if (isChecked && isRectifiedMain) {
-                Toast.makeText(this, "Can only edit when camera is main view", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Can only edit when camera is visible", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
 
             overlay.isEditMode = isChecked
             updateEditModeButtonUi()
-
-            if (isChecked) {
-                pipViewContainer.visibility = View.GONE
-            } else if (!isFullscreen) {
-                pipViewContainer.visibility = View.VISIBLE
-            }
             overlay.invalidate()
         }
 
         overlay.onDoubleTapListener = {
             toggleFullscreen()
         }
+        previewRectified.setOnTouchListener(object : View.OnTouchListener {
+            private var lastClickTime: Long = 0
+
+            override fun onTouch(v: View, event: android.view.MotionEvent): Boolean {
+                if (event.action == android.view.MotionEvent.ACTION_UP) {
+                    val clickTime = System.currentTimeMillis()
+                    if (clickTime - lastClickTime < 300) {
+                        toggleFullscreen()
+                    }
+                    lastClickTime = clickTime
+                }
+                return true
+            }
+        })
         overlay.onSingleTapListener = { x, y ->
             if (FocusModeUiModel.isTapToFocusEnabled(appSettings.focusMode, appSettings.isTapToFocusEnabled)) {
                 overlay.showFocusIndicator(x, y, Color.WHITE)
@@ -236,16 +243,18 @@ class MainActivity : AppCompatActivity() {
             showSettingsMenu()
         }
 
-        pipTouchBlocker.setOnClickListener {
-            swapViews()
+        previewDisplayToggle.setOnClickListener {
+            if (overlay.isEditMode && appSettings.previewDisplayMode == PreviewDisplayMode.CAMERA) {
+                overlay.isEditMode = false
+                updateEditModeButtonUi()
+            }
+            appSettings.previewDisplayMode = appSettings.previewDisplayMode.toggled()
+            applyPreviewDisplayMode()
+            cameraManager.updatePreviewAnalysisMode()
         }
 
         captureButton.setOnClickListener {
-            it.performHapticFeedback(
-                android.view.HapticFeedbackConstants.KEYBOARD_TAP,
-                android.view.HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING
-            )
-            cameraManager.takePhoto()
+            triggerCapture()
         }
 
         if (allPermissionsGranted()) {
@@ -296,6 +305,73 @@ class MainActivity : AppCompatActivity() {
         afLockButton.alpha = if (appSettings.focusMode != FocusMode.AUTO) 0.35f else if (appSettings.isAfLocked) 1f else 0.72f
     }
 
+    private fun updatePreviewDisplayUi() {
+        previewDisplayToggle.text = PreviewDisplayUiModel.toggleButtonLabel(appSettings.previewDisplayMode)
+    }
+
+    private fun updateCropFrameGuideUi() {
+        val showGuide = CropFrameGuideModel.shouldShowGuide(
+            isSettingEnabled = appSettings.isCropFrameGuideVisible,
+            isCropModeOff = appSettings.isCropModeOff,
+            previewDisplayMode = appSettings.previewDisplayMode
+        )
+        overlay.isCropFrameGuideVisible = showGuide
+        overlay.cropFrameGuideRect = if (showGuide) {
+            CropFrameGuideModel.projectedFrameRectInView(
+                sourceAspectRatio = cameraManager.getLatestPreviewSourceAspectRatio(),
+                viewAspectRatio = getCameraPreviewViewAspectRatio(),
+                focalLength = appSettings.focalLength,
+                aspectRatio = appSettings.noCropAspectRatio
+            )
+        } else {
+            null
+        }
+    }
+
+    private fun getCameraPreviewViewAspectRatio(): Float {
+        if (viewFinder.width > 0 && viewFinder.height > 0) {
+            return viewFinder.width.toFloat() / viewFinder.height.toFloat()
+        }
+        return 3f / 4f
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) {
+            updateCropFrameGuideUi()
+        }
+    }
+
+    private fun triggerCapture() {
+        captureButton.performHapticFeedback(
+            android.view.HapticFeedbackConstants.KEYBOARD_TAP,
+            android.view.HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING
+        )
+        cameraManager.takePhoto()
+    }
+
+    private fun applyPreviewDisplayMode(shouldSave: Boolean = true) {
+        isRectifiedMain = appSettings.previewDisplayMode == PreviewDisplayMode.RECTIFIED
+        val showCamera = appSettings.previewDisplayMode == PreviewDisplayMode.CAMERA
+
+        cameraContainer.visibility = if (showCamera) View.VISIBLE else View.GONE
+        previewRectified.visibility = if (showCamera) View.GONE else View.VISIBLE
+        overlay.isEnabled = showCamera
+
+        if (!showCamera && overlay.isEditMode) {
+            overlay.isEditMode = false
+        }
+
+        updatePreviewDisplayUi()
+        updateCropFrameGuideUi()
+        updateEditModeButtonUi()
+        overlay.invalidate()
+
+        if (shouldSave) {
+            appSettings.save(overlay.getNormalizedPoints())
+        }
+    }
+
     private fun updateEditModeButtonUi() {
         val isEditing = overlay.isEditMode
         editModeToggle.alpha = if (isRectifiedMain) 0.45f else 1f
@@ -324,6 +400,7 @@ class MainActivity : AppCompatActivity() {
             .setTitle("Select Focal Length")
             .setSingleChoiceItems(options, selectedIndex) { dialog, which ->
                 appSettings.focalLength = values[which]
+                updateCropFrameGuideUi()
                 appSettings.save(overlay.getNormalizedPoints())
                 Toast.makeText(this, "Focal Length set to ${options[which]}", Toast.LENGTH_SHORT).show()
                 dialog.dismiss()
@@ -343,6 +420,7 @@ class MainActivity : AppCompatActivity() {
             .setTitle("No-Crop Framing Ratio")
             .setSingleChoiceItems(options, selectedIndex) { dialog, which ->
                 appSettings.noCropAspectRatio = values[which]
+                updateCropFrameGuideUi()
                 appSettings.save(overlay.getNormalizedPoints())
                 Toast.makeText(this, "No-Crop Ratio set to ${options[which]}", Toast.LENGTH_SHORT).show()
                 dialog.dismiss()
@@ -352,8 +430,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showAdvancedSettingsDialog() {
-        val options = arrayOf("Sports Mode", "Disable Noise Reduction", "Disable Edge Sharpening", "Chroma Noise Reduction", "Disable Crop Mode", "WDR Mode", "Enable Tap to Focus")
-        val checkedItems = booleanArrayOf(appSettings.isSportsMode, appSettings.isNoiseReductionOff, appSettings.isEdgeModeOff, appSettings.isChromaDenoiseOn, appSettings.isCropModeOff, appSettings.isWdrMode, appSettings.isTapToFocusEnabled)
+        val options = arrayOf("Sports Mode", "Disable Noise Reduction", "Disable Edge Sharpening", "Chroma Noise Reduction", "Disable Crop Mode", "WDR Mode", "Enable Tap to Focus", "Show Crop Frame Guide")
+        val checkedItems = booleanArrayOf(appSettings.isSportsMode, appSettings.isNoiseReductionOff, appSettings.isEdgeModeOff, appSettings.isChromaDenoiseOn, appSettings.isCropModeOff, appSettings.isWdrMode, appSettings.isTapToFocusEnabled, appSettings.isCropFrameGuideVisible)
 
         MaterialAlertDialogBuilder(this)
             .setTitle("Advanced Settings")
@@ -366,12 +444,14 @@ class MainActivity : AppCompatActivity() {
                     4 -> appSettings.isCropModeOff = isChecked
                     5 -> appSettings.isWdrMode = isChecked
                     6 -> appSettings.isTapToFocusEnabled = isChecked
+                    7 -> appSettings.isCropFrameGuideVisible = isChecked
                 }
             }
             .setPositiveButton("OK") { _, _ ->
                 appSettings.save(overlay.getNormalizedPoints())
                 cameraManager.updateCameraSettings()
                 overlay.isOverlayVisible = !appSettings.isCropModeOff
+                updateCropFrameGuideUi()
                 cameraManager.applyFocusMode()
             }
             .setNegativeButton("Cancel", null)
@@ -805,131 +885,27 @@ class MainActivity : AppCompatActivity() {
 
             topControls.visibility = View.GONE
             bottomControls.visibility = View.GONE
-            pipViewContainer.visibility = View.GONE
         } else {
             params.height = 0
             params.width = 0
 
             topControls.visibility = View.VISIBLE
             bottomControls.visibility = View.VISIBLE
-            if (!overlay.isEditMode) {
-                pipViewContainer.visibility = View.VISIBLE
-            }
         }
         mainViewContainer.layoutParams = params
     }
 
-    private fun swapViews() {
-        if (overlay.isEditMode) {
-            Toast.makeText(this, "Exit edit mode before swapping views", Toast.LENGTH_SHORT).show()
-            return
-        }
-        
-        isRectifiedMain = !isRectifiedMain
-
-        val cameraParent = cameraContainer.parent as android.view.ViewGroup
-        val previewParent = previewRectified.parent as android.view.ViewGroup
-        
-        cameraParent.removeView(cameraContainer)
-        previewParent.removeView(previewRectified)
-        
-        // Save absolute points using camera dimensions before view resizes
-        val oldW = cameraContainer.width.toFloat()
-        val oldH = cameraContainer.height.toFloat()
-        val rawPoints = overlay.getNormalizedPoints().map { android.graphics.PointF(it.x * oldW, it.y * oldH) }
-
-        if (isRectifiedMain) {
-            mainViewContainer.addView(previewRectified)
-            pipFrame.addView(cameraContainer)
-            
-            overlay.isEnabled = false
-            
-            previewRectified.setOnClickListener(null)
-            previewRectified.setOnTouchListener(object : View.OnTouchListener {
-                private var lastClickTime: Long = 0
-                override fun onTouch(v: View, event: android.view.MotionEvent): Boolean {
-                    if (event.action == android.view.MotionEvent.ACTION_UP) {
-                        val clickTime = System.currentTimeMillis()
-                        if (clickTime - lastClickTime < 300) {
-                            toggleFullscreen()
-                        }
-                        lastClickTime = clickTime
-                    }
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+            when (event.keyCode) {
+                KeyEvent.KEYCODE_VOLUME_UP,
+                KeyEvent.KEYCODE_VOLUME_DOWN -> {
+                    triggerCapture()
                     return true
                 }
-            })
-            
-        } else {
-            mainViewContainer.addView(cameraContainer)
-            pipFrame.addView(previewRectified)
-            
-            overlay.isEnabled = true
-            previewRectified.setOnTouchListener(null)
-        }
-        
-        // Restore points to match new aspect ratio preserving physical image coordinates
-        // This is tricky because layout hasn't happened yet. We can use a ViewTreeObserver
-        // or just post it to the message queue so layout finishes.
-        cameraContainer.post {
-            val newW = cameraContainer.width.toFloat()
-            val newH = cameraContainer.height.toFloat()
-            if (oldW > 0 && oldH > 0 && newW > 0 && newH > 0) {
-                // Determine the image scales and letterbox offsets for old and new bounds.
-                // We don't have exact image size here, but we know the camera aspect ratio is fixed (e.g. 4:3).
-                // Usually it's 4:3 backwards (3:4 portrait)
-                // We'll estimate the aspect ratio by taking the PreviewView's latest frame, 
-                // but we don't have it explicitly.
-                // For a simpler heuristic, since we know ImageAnalysis gets a specific resolution (or we can just let 
-                // OverlayView keep its original normalized points relative to the image).
-                // Actually, OverlayView's built-in onSizeChanged blindly scales the points by (newW/oldW), 
-                // warping the aspect ratio if newW/newH != oldW/oldH.
-                // Let's counteract that warping!
-                // To do this properly, we should compute the letterbox Rect of the image inside old bounds,
-                // map points to [0..1] of that Rect, then compute letterbox Rect inside new bounds,
-                // and map points back.
-                
-                // Assuming typical 3:4 portrait camera aspect ratio (height > width):
-                val imgVertRatio = 4f/3f 
-                
-                fun getLetterboxRect(vw: Float, vh: Float, imgRatio: Float): android.graphics.RectF {
-                    val scale = kotlin.math.min(vw, vh / imgRatio)
-                    // If vw / vh < 1 / imgRatio (i.e. vw is bottleneck), scale is vw. (Since imgRatio > 1, 1/imgRatio < 1).
-                    // Wait, standard fitCenter sets scale = min(vw / imgW, vh / imgH).
-                    val scaleActual = kotlin.math.min(vw, vh / imgRatio)
-                    val outW = scaleActual
-                    val outH = scaleActual * imgRatio
-                    val dx = (vw - outW) / 2
-                    val dy = (vh - outH) / 2
-                    return android.graphics.RectF(dx, dy, dx + outW, dy + outH)
-                }
-                
-                val oldRect = getLetterboxRect(oldW, oldH, imgVertRatio)
-                val newRect = getLetterboxRect(newW, newH, imgVertRatio)
-                
-                // Map rawPoints (old layout) to normalized Image space
-                val imgPoints = rawPoints.map { p ->
-                    android.graphics.PointF(
-                        (p.x - oldRect.left) / oldRect.width(),
-                        (p.y - oldRect.top) / oldRect.height()
-                    )
-                }
-                
-                // Map normalized Image space to new layout space
-                val mappedNewPoints = imgPoints.map { p ->
-                    android.graphics.PointF(
-                        newRect.left + p.x * newRect.width(),
-                        newRect.top + p.y * newRect.height()
-                    )
-                }
-                
-                // Convert back to [0..1] normalized View coordinates for OverlayView
-                val newNormPoints = mappedNewPoints.map { p ->
-                    android.graphics.PointF(p.x / newW, p.y / newH)
-                }
-                
-                overlay.setNormalizedPoints(newNormPoints)
             }
         }
+        return super.dispatchKeyEvent(event)
     }
 
     companion object {
