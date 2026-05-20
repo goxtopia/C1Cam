@@ -22,7 +22,6 @@ import android.widget.ListView
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
-import android.widget.ToggleButton
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -48,8 +47,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var afLockButton: Button
     private lateinit var evSlider: Slider
     private lateinit var captureButton: com.google.android.material.floatingactionbutton.FloatingActionButton
-    private lateinit var settingsButton: Button
-    private lateinit var editModeToggle: ToggleButton
+    private lateinit var settingsButton: com.google.android.material.button.MaterialButton
+    private lateinit var editModeToggle: com.google.android.material.button.MaterialButton
     private lateinit var topControls: View
     private lateinit var bottomControls: View
     private lateinit var mainViewContainer: android.widget.FrameLayout
@@ -147,6 +146,7 @@ class MainActivity : AppCompatActivity() {
         focusSlider.value = appSettings.focusVal
         updateFocusModeUi()
         updateLockButtonsUi()
+        updateEditModeButtonUi()
         evSlider.value = appSettings.evVal
         if (appSettings.savedPoints != null) {
             overlay.setNormalizedPoints(appSettings.savedPoints!!)
@@ -198,22 +198,20 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        editModeToggle.setOnCheckedChangeListener { _, isChecked ->
+        editModeToggle.setOnClickListener {
+            val isChecked = !overlay.isEditMode
             if (isChecked && isRectifiedMain) {
-                // Not allowed when camera is not main view
-                editModeToggle.isChecked = false
                 Toast.makeText(this, "Can only edit when camera is main view", Toast.LENGTH_SHORT).show()
-                return@setOnCheckedChangeListener
+                return@setOnClickListener
             }
-            
+
             overlay.isEditMode = isChecked
-            
+            updateEditModeButtonUi()
+
             if (isChecked) {
                 pipViewContainer.visibility = View.GONE
-            } else {
-                if (!isFullscreen) {
-                    pipViewContainer.visibility = View.VISIBLE
-                }
+            } else if (!isFullscreen) {
+                pipViewContainer.visibility = View.VISIBLE
             }
             overlay.invalidate()
         }
@@ -258,17 +256,27 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showSettingsMenu() {
-        val options = arrayOf("Target Aspect Ratio", "Select LUT", "Import LUT (.cube)", "Advanced Settings", "Select Focal Length")
+        val options = buildList {
+            add("Target Aspect Ratio")
+            add("Select LUT")
+            add("Import LUT (.cube)")
+            add("Advanced Settings")
+            add("Select Focal Length")
+            if (appSettings.isCropModeOff) {
+                add("No-Crop Framing Ratio")
+            }
+        }.toTypedArray()
 
         MaterialAlertDialogBuilder(this)
             .setTitle("Settings")
             .setItems(options) { _, which ->
-                when (which) {
-                    0 -> showAspectRatioDialog()
-                    1 -> showLutDialog()
-                    2 -> launchImportLutPicker()
-                    3 -> showAdvancedSettingsDialog()
-                    4 -> showFocalLengthDialog()
+                when (options[which]) {
+                    "Target Aspect Ratio" -> showAspectRatioDialog()
+                    "Select LUT" -> showLutDialog()
+                    "Import LUT (.cube)" -> launchImportLutPicker()
+                    "Advanced Settings" -> showAdvancedSettingsDialog()
+                    "Select Focal Length" -> showFocalLengthDialog()
+                    "No-Crop Framing Ratio" -> showNoCropAspectRatioDialog()
                 }
             }
             .show()
@@ -284,9 +292,18 @@ class MainActivity : AppCompatActivity() {
         aeLockButton.text = if (appSettings.isAeLocked) "AE•" else "AE"
         afLockButton.text = if (appSettings.isAfLocked) "AF•" else "AF"
         aeLockButton.alpha = if (appSettings.isAeLocked) 1f else 0.72f
-        afLockButton.alpha = if (appSettings.isAfLocked) 1f else 0.72f
         afLockButton.isEnabled = appSettings.focusMode == FocusMode.AUTO
         afLockButton.alpha = if (appSettings.focusMode != FocusMode.AUTO) 0.35f else if (appSettings.isAfLocked) 1f else 0.72f
+    }
+
+    private fun updateEditModeButtonUi() {
+        val isEditing = overlay.isEditMode
+        editModeToggle.alpha = if (isRectifiedMain) 0.45f else 1f
+        editModeToggle.icon = ContextCompat.getDrawable(
+            this,
+            if (isEditing) android.R.drawable.checkbox_on_background else android.R.drawable.ic_menu_edit
+        )
+        editModeToggle.text = ""
     }
 
     private fun showFocalLengthDialog() {
@@ -309,6 +326,25 @@ class MainActivity : AppCompatActivity() {
                 appSettings.focalLength = values[which]
                 appSettings.save(overlay.getNormalizedPoints())
                 Toast.makeText(this, "Focal Length set to ${options[which]}", Toast.LENGTH_SHORT).show()
+                dialog.dismiss()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun showNoCropAspectRatioDialog() {
+        val options = arrayOf("Original", "3:2", "16:9", "2.35:1", "2.55:1", "1:1")
+        val values = floatArrayOf(0f, 1.5f, 16f / 9f, 2.35f, 2.55f, 1f)
+        val currentVal = appSettings.noCropAspectRatio
+        val selectedIndex = values.indexOfFirst { kotlin.math.abs(it - currentVal) < 0.001f }
+            .takeIf { it >= 0 } ?: 0
+
+        MaterialAlertDialogBuilder(this)
+            .setTitle("No-Crop Framing Ratio")
+            .setSingleChoiceItems(options, selectedIndex) { dialog, which ->
+                appSettings.noCropAspectRatio = values[which]
+                appSettings.save(overlay.getNormalizedPoints())
+                Toast.makeText(this, "No-Crop Ratio set to ${options[which]}", Toast.LENGTH_SHORT).show()
                 dialog.dismiss()
             }
             .setNegativeButton("Cancel", null)
@@ -776,7 +812,9 @@ class MainActivity : AppCompatActivity() {
 
             topControls.visibility = View.VISIBLE
             bottomControls.visibility = View.VISIBLE
-            pipViewContainer.visibility = View.VISIBLE
+            if (!overlay.isEditMode) {
+                pipViewContainer.visibility = View.VISIBLE
+            }
         }
         mainViewContainer.layoutParams = params
     }

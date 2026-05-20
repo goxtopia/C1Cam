@@ -22,6 +22,7 @@ class AppSettings(private val context: Context) {
     var isCropModeOff = false
     var isWdrMode = false
     var focalLength: Int = 24
+    var noCropAspectRatio: Float = 0f
     var savedPoints: List<PointF>? = null
 
     init {
@@ -44,6 +45,7 @@ class AppSettings(private val context: Context) {
         isCropModeOff = prefs.getBoolean(KEY_CROP_MODE_OFF, false)
         isWdrMode = prefs.getBoolean(KEY_WDR_MODE, false)
         focalLength = prefs.getInt(KEY_FOCAL_LENGTH, 24)
+        noCropAspectRatio = prefs.getFloat(KEY_NO_CROP_ASPECT_RATIO, 0f)
 
         val pointsStr = prefs.getString(KEY_POINTS, null)
         if (pointsStr != null) {
@@ -79,6 +81,7 @@ class AppSettings(private val context: Context) {
         editor.putBoolean(KEY_CROP_MODE_OFF, isCropModeOff)
         editor.putBoolean(KEY_WDR_MODE, isWdrMode)
         editor.putInt(KEY_FOCAL_LENGTH, focalLength)
+        editor.putFloat(KEY_NO_CROP_ASPECT_RATIO, noCropAspectRatio)
 
         if (currentPoints.size == 4) {
             val sb = StringBuilder()
@@ -110,5 +113,6 @@ class AppSettings(private val context: Context) {
         private const val KEY_CROP_MODE_OFF = "crop_mode_off"
         private const val KEY_WDR_MODE = "wdr_mode"
         private const val KEY_FOCAL_LENGTH = "focal_length"
+        private const val KEY_NO_CROP_ASPECT_RATIO = "no_crop_aspect_ratio"
     }
 }

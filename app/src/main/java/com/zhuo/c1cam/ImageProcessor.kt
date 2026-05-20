@@ -40,7 +40,8 @@ class ImageProcessor(private val context: Context) {
         currentLut: Lut3D?,
         isChromaDenoiseOn: Boolean,
         isCropModeOff: Boolean,
-        focalLength: Int
+        focalLength: Int,
+        noCropAspectRatio: Float
     ) {
         val rotationDegrees = imageProxy.imageInfo.rotationDegrees
 
@@ -68,7 +69,7 @@ class ImageProcessor(private val context: Context) {
         }
 
         val finalBitmap = if (isCropModeOff) {
-            val croppedBitmap = cropForFocalLength(uprightBitmap, focalLength)
+            val croppedBitmap = cropForNoCropMode(uprightBitmap, focalLength, noCropAspectRatio)
             currentLut?.let {
                 LutUtils.applyLut(croppedBitmap, it)
             } ?: croppedBitmap
@@ -97,7 +98,8 @@ class ImageProcessor(private val context: Context) {
         targetAspectRatio: Float,
         currentLut: Lut3D?,
         isCropModeOff: Boolean,
-        focalLength: Int
+        focalLength: Int,
+        noCropAspectRatio: Float
     ): Bitmap {
         val rotationDegrees = imageProxy.imageInfo.rotationDegrees
         // This allocation is hard to avoid without custom YUV converter
@@ -130,8 +132,7 @@ class ImageProcessor(private val context: Context) {
 
         if (isCropModeOff) {
             // Digital Zoom Crop & Scale
-            // 2. Crop logic (focal length)
-            val cropRect = getCropRectForFocalLength(uprightBmp.width, uprightBmp.height, focalLength)
+            val cropRect = getCropRectForNoCropMode(uprightBmp.width, uprightBmp.height, focalLength, noCropAspectRatio)
 
             // 3. Scale down logic
             val maxDim = 512
@@ -236,10 +237,37 @@ class ImageProcessor(private val context: Context) {
         }
     }
 
-    private fun cropForFocalLength(bitmap: Bitmap, focalLength: Int): Bitmap {
-        if (focalLength <= 24) return bitmap
-        val cropRect = getCropRectForFocalLength(bitmap.width, bitmap.height, focalLength)
+    private fun cropForNoCropMode(bitmap: Bitmap, focalLength: Int, aspectRatio: Float): Bitmap {
+        val cropRect = getCropRectForNoCropMode(bitmap.width, bitmap.height, focalLength, aspectRatio)
         return Bitmap.createBitmap(bitmap, cropRect.left.toInt(), cropRect.top.toInt(), cropRect.width().toInt(), cropRect.height().toInt())
+    }
+
+    private fun getCropRectForNoCropMode(w: Int, h: Int, focalLength: Int, aspectRatio: Float): android.graphics.RectF {
+        val focalRect = getCropRectForFocalLength(w, h, focalLength)
+        if (aspectRatio <= 0f) return focalRect
+
+        val focalWidth = focalRect.width()
+        val focalHeight = focalRect.height()
+        val sourceIsLandscape = focalWidth >= focalHeight
+        val targetIsLandscape = aspectRatio >= 1f
+        val effectiveAspectRatio = if (sourceIsLandscape == targetIsLandscape) {
+            aspectRatio
+        } else {
+            1f / aspectRatio
+        }
+
+        val currentRatio = focalWidth / focalHeight
+        var cropWidth = focalWidth
+        var cropHeight = focalHeight
+        if (currentRatio > effectiveAspectRatio) {
+            cropWidth = focalHeight * effectiveAspectRatio
+        } else {
+            cropHeight = focalWidth / effectiveAspectRatio
+        }
+
+        val left = focalRect.left + (focalWidth - cropWidth) / 2f
+        val top = focalRect.top + (focalHeight - cropHeight) / 2f
+        return android.graphics.RectF(left, top, left + cropWidth, top + cropHeight)
     }
 
     private fun getCropRectForFocalLength(w: Int, h: Int, focalLength: Int): android.graphics.RectF {

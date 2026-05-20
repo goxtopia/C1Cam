@@ -95,54 +95,64 @@
     </com.google.android.material.card.MaterialCardView>
 
     <!-- Top Controls -->
-    <androidx.constraintlayout.widget.ConstraintLayout
+    <LinearLayout
         android:id="@+id/top_controls"
-        android:layout_width="0dp"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginStart="10dp"
-        android:layout_marginTop="8dp"
+        android:layout_marginTop="10dp"
         android:layout_marginEnd="10dp"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
         android:background="@drawable/bg_panel_top"
-        android:paddingStart="12dp"
+        android:paddingStart="8dp"
         android:paddingTop="8dp"
-        android:paddingEnd="12dp"
-        android:paddingBottom="8dp">
+        android:paddingEnd="8dp"
+        android:paddingBottom="8dp"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
 
-        <Button
-            android:id="@+id/settings_button"
-            style="@style/Widget.Material3.Button.OutlinedButton"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:text="Settings"
-            android:textColor="@color/cam_text_primary"
-            app:icon="@android:drawable/ic_menu_preferences"
-            app:iconTint="@color/cam_text_primary"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintEnd_toStartOf="@id/edit_mode_toggle"
-            app:layout_constraintTop_toTopOf="parent"
-            app:layout_constraintBottom_toBottomOf="parent" />
-
-        <ToggleButton
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/edit_mode_toggle"
-            android:layout_width="96dp"
-            android:layout_height="40dp"
-            android:background="@drawable/bg_edit_toggle"
-            android:textOn="Done"
-            android:textOff="Edit"
+            style="@style/Widget.Material3.Button.IconButton.Outlined"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:layout_marginEnd="8dp"
+            android:background="@drawable/bg_top_chip"
+            android:checkable="true"
             android:checked="false"
-            android:textColor="@color/cam_text_primary"
+            android:contentDescription="Edit overlay"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:minWidth="0dp"
             android:minHeight="0dp"
-            android:paddingStart="10dp"
-            android:paddingEnd="10dp"
-            android:gravity="center"
-            app:layout_constraintEnd_toEndOf="parent"
-            app:layout_constraintTop_toTopOf="parent"
-            app:layout_constraintBottom_toBottomOf="parent" />
+            android:padding="0dp"
+            android:text=""
+            app:icon="@android:drawable/ic_menu_edit"
+            app:iconGravity="textStart"
+            app:iconPadding="0dp"
+            app:iconTint="@color/cam_text_primary"
+            app:strokeWidth="0dp" />
 
-    </androidx.constraintlayout.widget.ConstraintLayout>
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/settings_button"
+            style="@style/Widget.Material3.Button.IconButton.Outlined"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:background="@drawable/bg_icon_button"
+            android:contentDescription="Settings"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:minWidth="0dp"
+            android:minHeight="0dp"
+            android:padding="0dp"
+            android:text=""
+            app:icon="@android:drawable/ic_menu_manage"
+            app:iconGravity="textStart"
+            app:iconPadding="0dp"
+            app:iconTint="@color/cam_text_primary"
+            app:strokeWidth="0dp" />
+
+    </LinearLayout>
 
     <!-- Bottom Controls -->
     <androidx.constraintlayout.widget.ConstraintLayout
@@ -177,7 +187,7 @@
                 android:layout_height="wrap_content"
                 android:gravity="center_vertical"
                 android:orientation="horizontal">
-                
+
                 <TextView
                     android:layout_width="32dp"
                     android:layout_height="28dp"
@@ -210,11 +220,21 @@
                 android:gravity="center_vertical"
                 android:orientation="horizontal">
 
+                <TextView
+                    android:layout_width="32dp"
+                    android:layout_height="28dp"
+                    android:background="@drawable/bg_edit_toggle"
+                    android:gravity="center"
+                    android:text="F"
+                    android:textColor="@color/cam_text_primary"
+                    android:textStyle="bold"
+                    android:textSize="11sp" />
+
                 <com.google.android.material.slider.Slider
                     android:id="@+id/focus_slider"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_marginEnd="8dp"
+                    android:layout_marginStart="10dp"
                     android:layout_weight="1"
                     android:valueFrom="0.0"
                     android:valueTo="1.0"
@@ -222,18 +242,26 @@
                     app:thumbColor="@color/cam_accent"
                     app:trackColorActive="@color/cam_accent"
                     app:trackColorInactive="#50FFFFFF" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:gravity="end|center_vertical"
+                android:orientation="horizontal">
 
                 <Button
                     android:id="@+id/focus_mode_button"
                     style="@style/Widget.Material3.Button.OutlinedButton"
                     android:layout_width="44dp"
-                    android:layout_height="36dp"
+                    android:layout_height="34dp"
                     android:minWidth="0dp"
                     android:minHeight="0dp"
                     android:paddingStart="0dp"
                     android:paddingEnd="0dp"
                     android:text="MF"
-                    android:textSize="11sp"
+                    android:textSize="10sp"
                     android:textColor="@color/cam_text_primary"
                     app:strokeColor="@color/cam_accent"
                     app:iconTint="@color/cam_text_primary" />
@@ -242,14 +270,14 @@
                     android:id="@+id/ae_lock_button"
                     style="@style/Widget.Material3.Button.OutlinedButton"
                     android:layout_width="40dp"
-                    android:layout_height="36dp"
+                    android:layout_height="34dp"
                     android:layout_marginStart="6dp"
                     android:minWidth="0dp"
                     android:minHeight="0dp"
                     android:paddingStart="0dp"
                     android:paddingEnd="0dp"
                     android:text="AE"
-                    android:textSize="11sp"
+                    android:textSize="10sp"
                     android:textColor="@color/cam_text_primary"
                     app:strokeColor="@color/cam_accent"
                     app:iconTint="@color/cam_text_primary" />
@@ -258,14 +286,14 @@
                     android:id="@+id/af_lock_button"
                     style="@style/Widget.Material3.Button.OutlinedButton"
                     android:layout_width="40dp"
-                    android:layout_height="36dp"
+                    android:layout_height="34dp"
                     android:layout_marginStart="6dp"
                     android:minWidth="0dp"
                     android:minHeight="0dp"
                     android:paddingStart="0dp"
                     android:paddingEnd="0dp"
                     android:text="AF"
-                    android:textSize="11sp"
+                    android:textSize="10sp"
                     android:textColor="@color/cam_text_primary"
                     app:strokeColor="@color/cam_accent"
                     app:iconTint="@color/cam_text_primary" />
