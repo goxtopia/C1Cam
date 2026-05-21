@@ -31,8 +31,8 @@ object ChromaNoiseReduction {
         uniform sampler2D texY;
         uniform sampler2D texU;
         uniform sampler2D texV;
-        uniform float width;
-        uniform float height;
+        uniform float chromaWidth;
+        uniform float chromaHeight;
         uniform float sigmaSpatial;
         uniform float sigmaRange;
         uniform int radius;
@@ -51,7 +51,7 @@ object ChromaNoiseReduction {
         }
 
         void main() {
-            vec2 texSize = vec2(width, height);
+            vec2 texSize = vec2(chromaWidth, chromaHeight);
             vec2 texelSize = 1.0 / texSize;
 
             float centerY = texture2D(texY, vTexCoord).r;
@@ -63,7 +63,7 @@ object ChromaNoiseReduction {
             for (int y = -radius; y <= radius; y++) {
                 for (int x = -radius; x <= radius; x++) {
                     vec2 offset = vec2(float(x), float(y)) * texelSize;
-                    vec2 neighborCoord = vTexCoord + offset;
+                    vec2 neighborCoord = clamp(vTexCoord + offset, vec2(0.0), vec2(1.0));
 
                     float neighborY = texture2D(texY, neighborCoord).r;
                     float neighborU = texture2D(texU, neighborCoord).r;
@@ -72,7 +72,6 @@ object ChromaNoiseReduction {
                     float distSq = float(x*x + y*y);
                     float rangeDiff = abs(neighborY - centerY);
 
-                    // Gaussian weights
                     float wSpatial = exp(-distSq / (2.0 * sigmaSpatial * sigmaSpatial));
                     float wRange = exp(-(rangeDiff * rangeDiff) / (2.0 * sigmaRange * sigmaRange));
 
@@ -175,8 +174,8 @@ object ChromaNoiseReduction {
             GLES20.glUniform1i(GLES20.glGetUniformLocation(program, "texU"), 1)
             GLES20.glUniform1i(GLES20.glGetUniformLocation(program, "texV"), 2)
 
-            GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "width"), width.toFloat())
-            GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "height"), height.toFloat())
+            GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "chromaWidth"), (width / 2).toFloat())
+            GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "chromaHeight"), (height / 2).toFloat())
             GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "sigmaSpatial"), 3.0f)
             GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "sigmaRange"), 0.1f) // Normalized range [0, 1]
             GLES20.glUniform1i(GLES20.glGetUniformLocation(program, "radius"), 3)
