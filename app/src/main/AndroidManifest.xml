@@ -13,15 +13,29 @@
         android:icon="@drawable/icon"
         android:label="@string/app_name"
         android:roundIcon="@drawable/icon"
+        android:directBootAware="true"
         android:supportsRtl="true"
         android:theme="@style/Theme.C1Cam">
         <activity
             android:name=".MainActivity"
-            android:exported="true">
+            android:showWhenLocked="true"
+            android:showForAllUsers="true"
+            android:turnScreenOn="true"
+            android:exported="true"
+            tools:targetApi="27">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <intent-filter>
+                <action android:name="android.media.action.STILL_IMAGE_CAMERA_SECURE" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+
+            <intent-filter>
+                <action android:name="android.intent.action.ASSIST" />
+                <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
     </application>

@@ -1,6 +1,8 @@
 package com.zhuo.c1cam
 
 import android.Manifest
+import android.app.KeyguardManager
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
@@ -90,6 +92,12 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true)
+            setTurnScreenOn(true)
+        }
+
+
         enableEdgeToEdge()
         setContentView(R.layout.activity_main)
         ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main)) { v, insets ->
@@ -260,7 +268,15 @@ class MainActivity : AppCompatActivity() {
         if (allPermissionsGranted()) {
             cameraManager.startCamera()
         } else {
-            requestPermissions()
+            val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
+            if (keyguardManager.isKeyguardLocked) {
+                // 在锁屏状态下，绝对不能请求权限，只能提示用户并退出或展示占位界面
+                Toast.makeText(this, "首次使用或权限丢失，请先解锁手机授予相机权限", Toast.LENGTH_LONG).show()
+                finish() // 建议直接关闭，让用户去正常桌面打开授权
+            } else {
+                // 正常解锁状态，安全地请求权限
+                requestPermissions()
+            }
         }
     }
 
