@@ -1,8 +1,16 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <!-- Base application theme. -->
     <style name="Base.Theme.C1Cam" parent="Theme.Material3.DayNight.NoActionBar">
-        <!-- Customize your light theme here. -->
-        <!-- <item name="colorPrimary">@color/my_light_primary</item> -->
+        <item name="colorPrimary">@color/cam_accent</item>
+        <item name="colorSecondary">@color/cam_accent</item>
+        <item name="colorSurface">@color/cam_surface</item>
+        <item name="colorOnSurface">@color/cam_text_primary</item>
+        <item name="android:colorAccent">@color/cam_accent</item>
+        <item name="android:fontFamily">sans-serif</item>
+        <item name="android:navigationBarColor">@color/cam_bg_end</item>
+        <item name="android:statusBarColor">@color/cam_bg_end</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowActionModeOverlay">true</item>
     </style>
 
     <style name="Theme.C1Cam" parent="Base.Theme.C1Cam" />

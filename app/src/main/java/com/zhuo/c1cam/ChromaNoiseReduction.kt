@@ -35,6 +35,8 @@ object ChromaNoiseReduction {
         uniform float chromaHeight;
         uniform float sigmaSpatial;
         uniform float sigmaRange;
+        uniform float darkThreshold;
+        uniform float filterStrength;
         uniform int radius;
 
         // Convert YUV to RGB (BT.601 Full Range)
@@ -55,6 +57,8 @@ object ChromaNoiseReduction {
             vec2 texelSize = 1.0 / texSize;
 
             float centerY = texture2D(texY, vTexCoord).r;
+            float centerU = texture2D(texU, vTexCoord).r;
+            float centerV = texture2D(texV, vTexCoord).r;
 
             float sumU = 0.0;
             float sumV = 0.0;
@@ -83,16 +87,15 @@ object ChromaNoiseReduction {
                 }
             }
 
-            float finalU = sumU / sumW;
-            float finalV = sumV / sumW;
+            float finalU = mix(centerU, sumU / sumW, filterStrength);
+            float finalV = mix(centerV, sumV / sumW, filterStrength);
 
-            // Trick: Desaturate dark areas to reduce color noise
-            float threshold = 0.2;
-            if (centerY < threshold) {
-                float factor = centerY / threshold;
-                // Linearly interpolate towards 0.5 (grayscale for U/V)
-                finalU = mix(0.5, finalU, factor);
-                finalV = mix(0.5, finalV, factor);
+            // Gradually reduce dark-area chroma according to the selected strength.
+            if (centerY < darkThreshold) {
+                float luminanceRetention = centerY / darkThreshold;
+                float chromaRetention = mix(1.0, luminanceRetention, filterStrength);
+                finalU = mix(0.5, finalU, chromaRetention);
+                finalV = mix(0.5, finalV, chromaRetention);
             }
 
             // Reconstruct RGB with original Y and filtered U/V
@@ -101,11 +104,25 @@ object ChromaNoiseReduction {
         }
     """
 
-    fun process(image: ImageProxy): Bitmap {
+    fun process(
+        image: ImageProxy,
+        configuredMode: ChromaDenoiseMode,
+        iso: Int?
+    ): Bitmap {
+        val resolvedMode = configuredMode.resolveForIso(iso)
+        if (resolvedMode == ChromaDenoiseMode.OFF) {
+            Log.d(TAG, "Skipping Chroma NR. configured=$configuredMode iso=$iso resolved=OFF")
+            return image.toBitmap()
+        }
+        val parameters = parametersFor(resolvedMode)
         val width = image.width
         val height = image.height
 
-        Log.d(TAG, "Starting Chroma NR. Image: ${width}x${height} format=${image.format}")
+        Log.d(
+            TAG,
+            "Starting Chroma NR. configured=$configuredMode resolved=$resolvedMode iso=$iso " +
+                "image=${width}x${height} format=${image.format}"
+        )
 
         val eglEnv = EglEnvironment(width, height)
         var bitmap: Bitmap? = null
@@ -176,9 +193,26 @@ object ChromaNoiseReduction {
 
             GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "chromaWidth"), (width / 2).toFloat())
             GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "chromaHeight"), (height / 2).toFloat())
-            GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "sigmaSpatial"), 3.0f)
-            GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "sigmaRange"), 0.1f) // Normalized range [0, 1]
-            GLES20.glUniform1i(GLES20.glGetUniformLocation(program, "radius"), 3)
+            GLES20.glUniform1f(
+                GLES20.glGetUniformLocation(program, "sigmaSpatial"),
+                parameters.sigmaSpatial
+            )
+            GLES20.glUniform1f(
+                GLES20.glGetUniformLocation(program, "sigmaRange"),
+                parameters.sigmaRange
+            )
+            GLES20.glUniform1f(
+                GLES20.glGetUniformLocation(program, "darkThreshold"),
+                parameters.darkThreshold
+            )
+            GLES20.glUniform1f(
+                GLES20.glGetUniformLocation(program, "filterStrength"),
+                parameters.filterStrength
+            )
+            GLES20.glUniform1i(
+                GLES20.glGetUniformLocation(program, "radius"),
+                parameters.radius
+            )
             checkGlError("glUniforms")
 
             // Setup FBO
@@ -246,6 +280,42 @@ object ChromaNoiseReduction {
 
         return bitmap ?: image.toBitmap()
     }
+
+    private fun parametersFor(mode: ChromaDenoiseMode): DenoiseParameters {
+        return when (mode) {
+            ChromaDenoiseMode.LOW -> DenoiseParameters(
+                radius = 1,
+                sigmaSpatial = 1.2f,
+                sigmaRange = 0.04f,
+                darkThreshold = 0.10f,
+                filterStrength = 0.45f
+            )
+            ChromaDenoiseMode.MEDIUM -> DenoiseParameters(
+                radius = 2,
+                sigmaSpatial = 2.0f,
+                sigmaRange = 0.07f,
+                darkThreshold = 0.16f,
+                filterStrength = 0.72f
+            )
+            ChromaDenoiseMode.HIGH -> DenoiseParameters(
+                radius = 3,
+                sigmaSpatial = 3.0f,
+                sigmaRange = 0.10f,
+                darkThreshold = 0.22f,
+                filterStrength = 1.0f
+            )
+            ChromaDenoiseMode.OFF,
+            ChromaDenoiseMode.AUTO -> error("Mode must be resolved before selecting parameters")
+        }
+    }
+
+    private data class DenoiseParameters(
+        val radius: Int,
+        val sigmaSpatial: Float,
+        val sigmaRange: Float,
+        val darkThreshold: Float,
+        val filterStrength: Float
+    )
 
     private fun extractPlane(plane: ImageProxy.PlaneProxy, width: Int, height: Int, name: String): ByteBuffer {
         val buffer = plane.buffer

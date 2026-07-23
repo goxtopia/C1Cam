@@ -7,14 +7,17 @@ import android.graphics.Canvas
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.PointF
+import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
 import android.util.Log
-import android.widget.Toast
 import androidx.camera.core.ImageProxy
+import androidx.exifinterface.media.ExifInterface
 import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 import kotlin.math.max
+import kotlin.math.roundToInt
 
 class ImageProcessor(private val context: Context) {
 
@@ -38,17 +41,23 @@ class ImageProcessor(private val context: Context) {
         viewH: Int,
         targetAspectRatio: Float,
         currentLut: Lut3D?,
-        isChromaDenoiseOn: Boolean,
+        chromaDenoiseMode: ChromaDenoiseMode,
         isCropModeOff: Boolean,
         focalLength: Int,
-        noCropAspectRatio: Float
-    ) {
+        noCropAspectRatio: Float,
+        outputFormat: ImageOutputFormat,
+        captureMetadata: CaptureMetadata
+    ): Boolean {
         val rotationDegrees = imageProxy.imageInfo.rotationDegrees
 
         // Convert to Bitmap, applying Chroma Noise Reduction if enabled
         val bitmap = try {
-            if (isChromaDenoiseOn) {
-                ChromaNoiseReduction.process(imageProxy)
+            if (chromaDenoiseMode != ChromaDenoiseMode.OFF) {
+                ChromaNoiseReduction.process(
+                    image = imageProxy,
+                    configuredMode = chromaDenoiseMode,
+                    iso = captureMetadata.iso
+                )
             } else {
                 imageProxy.toBitmap()
             }
@@ -87,7 +96,7 @@ class ImageProcessor(private val context: Context) {
         }
 
         // Save
-        saveBitmapToGallery(finalBitmap)
+        return saveBitmapToGallery(finalBitmap, outputFormat, captureMetadata)
     }
 
     fun processForPreview(
@@ -285,34 +294,164 @@ class ImageProcessor(private val context: Context) {
         return android.graphics.RectF(x, y, x + newW, y + newH)
     }
 
-    private fun saveBitmapToGallery(bitmap: Bitmap) {
-        val name = SimpleDateFormat(FILENAME_FORMAT, Locale.US).format(System.currentTimeMillis())
+    private fun saveBitmapToGallery(
+        bitmap: Bitmap,
+        outputFormat: ImageOutputFormat,
+        metadata: CaptureMetadata
+    ): Boolean {
+        val timestamp = Date(metadata.capturedAtMillis)
+        val baseName = SimpleDateFormat(FILENAME_FORMAT, Locale.US).format(timestamp)
+        val name = "$baseName.${outputFormat.extension}"
         val contentValues = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, name)
-            put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+            put(MediaStore.MediaColumns.MIME_TYPE, outputFormat.mimeType)
             if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P) {
                 put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/C1Cam")
+                put(MediaStore.Images.Media.IS_PENDING, 1)
             }
         }
 
         val contentResolver = context.contentResolver
         val outputUri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
 
-        if (outputUri != null) {
-            try {
-                val outputStream = contentResolver.openOutputStream(outputUri)
-                if (outputStream != null) {
-                    bitmap.compress(Bitmap.CompressFormat.JPEG, 100, outputStream)
-                    outputStream.close()
+        if (outputUri == null) return false
+
+        var savedSuccessfully = false
+        try {
+            val outputStream = contentResolver.openOutputStream(outputUri, "w")
+                ?: error("Unable to open gallery output stream")
+            outputStream.use {
+                val compressFormat = when (outputFormat) {
+                    ImageOutputFormat.JPEG -> Bitmap.CompressFormat.JPEG
+                    ImageOutputFormat.PNG -> Bitmap.CompressFormat.PNG
                 }
-            } catch (e: Exception) {
-                Log.e("ImageProcessor", "Error saving image", e)
+                if (!bitmap.compress(compressFormat, JPEG_QUALITY, it)) {
+                    error("Bitmap compression failed")
+                }
+            }
+
+            if (outputFormat == ImageOutputFormat.JPEG) {
+                writeJpegExif(outputUri, bitmap, metadata)
+            }
+            savedSuccessfully = true
+        } catch (e: Exception) {
+            Log.e("ImageProcessor", "Error saving image", e)
+        } finally {
+            if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P && savedSuccessfully) {
+                contentResolver.update(
+                    outputUri,
+                    ContentValues().apply {
+                        put(MediaStore.Images.Media.IS_PENDING, 0)
+                    },
+                    null,
+                    null
+                )
+            } else if (!savedSuccessfully) {
+                contentResolver.delete(outputUri, null, null)
             }
         }
+        return savedSuccessfully
+    }
+
+    private fun writeJpegExif(
+        imageUri: Uri,
+        bitmap: Bitmap,
+        metadata: CaptureMetadata
+    ) {
+        val fileDescriptor = context.contentResolver.openFileDescriptor(imageUri, "rw")
+            ?: error("Unable to open JPEG for metadata writing")
+        fileDescriptor.use { descriptor ->
+            val exif = ExifInterface(descriptor.fileDescriptor)
+            val capturedAt = Date(metadata.capturedAtMillis)
+            val exifDate = SimpleDateFormat(EXIF_DATE_FORMAT, Locale.US).format(capturedAt)
+            val subsecond = SimpleDateFormat(EXIF_SUBSECOND_FORMAT, Locale.US).format(capturedAt)
+
+            exif.setAttribute(ExifInterface.TAG_DATETIME, exifDate)
+            exif.setAttribute(ExifInterface.TAG_DATETIME_ORIGINAL, exifDate)
+            exif.setAttribute(ExifInterface.TAG_DATETIME_DIGITIZED, exifDate)
+            exif.setAttribute(ExifInterface.TAG_SUBSEC_TIME, subsecond)
+            exif.setAttribute(ExifInterface.TAG_SUBSEC_TIME_ORIGINAL, subsecond)
+            exif.setAttribute(ExifInterface.TAG_SUBSEC_TIME_DIGITIZED, subsecond)
+            exif.setAttribute(ExifInterface.TAG_MAKE, Build.MANUFACTURER)
+            exif.setAttribute(ExifInterface.TAG_MODEL, Build.MODEL)
+            exif.setAttribute(ExifInterface.TAG_SOFTWARE, "C1Cam")
+            exif.setAttribute(ExifInterface.TAG_IMAGE_WIDTH, bitmap.width.toString())
+            exif.setAttribute(ExifInterface.TAG_IMAGE_LENGTH, bitmap.height.toString())
+            exif.setAttribute(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL.toString())
+            exif.setAttribute(
+                ExifInterface.TAG_FOCAL_LENGTH_IN_35MM_FILM,
+                metadata.equivalentFocalLengthMm.toString()
+            )
+            exif.setAttribute(
+                ExifInterface.TAG_EXPOSURE_BIAS_VALUE,
+                decimalToRational(metadata.exposureCompensationEv)
+            )
+
+            metadata.iso?.let {
+                exif.setAttribute(ExifInterface.TAG_ISO_SPEED_RATINGS, it.toString())
+            }
+            metadata.exposureTimeNs?.takeIf { it > 0L }?.let {
+                exif.setAttribute(ExifInterface.TAG_EXPOSURE_TIME, nanosecondsToRational(it))
+            }
+            metadata.aperture?.takeIf { it > 0f }?.let {
+                exif.setAttribute(ExifInterface.TAG_F_NUMBER, decimalToRational(it))
+            }
+            metadata.physicalFocalLengthMm?.takeIf { it > 0f }?.let {
+                exif.setAttribute(ExifInterface.TAG_FOCAL_LENGTH, decimalToRational(it))
+            }
+            metadata.isAutoWhiteBalance?.let {
+                exif.setAttribute(ExifInterface.TAG_WHITE_BALANCE, if (it) "0" else "1")
+            }
+            metadata.isFlashFired?.let {
+                exif.setAttribute(ExifInterface.TAG_FLASH, if (it) "1" else "0")
+            }
+            exif.setAttribute(
+                ExifInterface.TAG_USER_COMMENT,
+                "Processed by C1Cam; equivalent focal length ${metadata.equivalentFocalLengthMm}mm"
+            )
+            exif.saveAttributes()
+        }
+    }
+
+    private fun decimalToRational(value: Float, denominator: Int = 1000): String {
+        val numerator = (value * denominator).roundToInt()
+        val divisor = greatestCommonDivisor(kotlin.math.abs(numerator), denominator)
+        return "${numerator / divisor}/${denominator / divisor}"
+    }
+
+    private fun nanosecondsToRational(value: Long): String {
+        val denominator = 1_000_000_000L
+        val divisor = greatestCommonDivisor(value, denominator)
+        return "${value / divisor}/${denominator / divisor}"
+    }
+
+    private fun greatestCommonDivisor(a: Int, b: Int): Int {
+        var x = a.coerceAtLeast(1)
+        var y = b.coerceAtLeast(1)
+        while (y != 0) {
+            val remainder = x % y
+            x = y
+            y = remainder
+        }
+        return x
+    }
+
+    private fun greatestCommonDivisor(a: Long, b: Long): Long {
+        var x = a.coerceAtLeast(1L)
+        var y = b.coerceAtLeast(1L)
+        while (y != 0L) {
+            val remainder = x % y
+            x = y
+            y = remainder
+        }
+        return x
     }
 
     companion object {
         private const val PREVIEW_MAX_DIMENSION = 1920
         private const val FILENAME_FORMAT = "yyyy-MM-dd-HH-mm-ss-SSS"
+        private const val EXIF_DATE_FORMAT = "yyyy:MM:dd HH:mm:ss"
+        private const val EXIF_SUBSECOND_FORMAT = "SSS"
+        private const val JPEG_QUALITY = 100
     }
 }

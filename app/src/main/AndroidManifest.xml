@@ -17,6 +17,9 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.C1Cam">
         <activity
+            android:name=".SettingsActivity"
+            android:exported="false" />
+        <activity
             android:name=".MainActivity"
             android:showWhenLocked="true"
             android:showForAllUsers="true"

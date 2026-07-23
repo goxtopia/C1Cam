@@ -3,41 +3,25 @@ package com.zhuo.c1cam
 import android.Manifest
 import android.app.KeyguardManager
 import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.Color
-import android.graphics.LinearGradient
-import android.graphics.Paint
-import android.graphics.Shader
-import android.net.Uri
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
-import android.provider.OpenableColumns
-import android.util.Log
 import android.view.KeyEvent
-import android.view.LayoutInflater
 import android.view.View
-import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.ImageView
-import android.widget.ListView
-import android.widget.ProgressBar
-import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
-import androidx.core.graphics.drawable.toBitmap
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.slider.Slider
 import java.io.File
-import java.util.UUID
-import java.util.concurrent.Executors
 
 class MainActivity : AppCompatActivity() {
 
@@ -84,10 +68,9 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-    private val importLutLauncher =
-        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-            if (uri == null) return@registerForActivityResult
-            importLutFromUri(uri)
+    private val settingsLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            refreshSettingsFromStorage()
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -248,7 +231,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         settingsButton.setOnClickListener {
-            showSettingsMenu()
+            settingsLauncher.launch(Intent(this, SettingsActivity::class.java))
         }
 
         previewDisplayToggle.setOnClickListener {
@@ -280,31 +263,32 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun showSettingsMenu() {
-        val options = buildList {
-            add("Target Aspect Ratio")
-            add("Select LUT")
-            add("Import LUT (.cube)")
-            add("Advanced Settings")
-            add("Select Focal Length")
-            if (appSettings.isCropModeOff) {
-                add("No-Crop Framing Ratio")
-            }
-        }.toTypedArray()
+    private fun refreshSettingsFromStorage() {
+        appSettings.load()
 
-        MaterialAlertDialogBuilder(this)
-            .setTitle("Settings")
-            .setItems(options) { _, which ->
-                when (options[which]) {
-                    "Target Aspect Ratio" -> showAspectRatioDialog()
-                    "Select LUT" -> showLutDialog()
-                    "Import LUT (.cube)" -> launchImportLutPicker()
-                    "Advanced Settings" -> showAdvancedSettingsDialog()
-                    "Select Focal Length" -> showFocalLengthDialog()
-                    "No-Crop Framing Ratio" -> showNoCropAspectRatioDialog()
-                }
+        currentLut = appSettings.lutName?.let { savedKey ->
+            val normalizedKey = normalizeLutStorageKey(savedKey)
+            loadLutFromStorageKey(normalizedKey)?.also {
+                appSettings.lutName = normalizedKey
             }
-            .show()
+        }
+        if (appSettings.lutName != null && currentLut == null) {
+            appSettings.lutName = null
+        }
+
+        focusSlider.value = appSettings.focusVal
+        evSlider.value = appSettings.evVal
+        overlay.isOverlayVisible = !appSettings.isCropModeOff
+        updateFocusModeUi()
+        updateLockButtonsUi()
+        applyPreviewDisplayMode(shouldSave = false)
+
+        cameraManager.updateCameraSettings()
+        cameraManager.applyFocusMode()
+        cameraManager.setExposureCompensation(appSettings.evVal)
+        cameraManager.updatePreviewAnalysisMode()
+        updateCropFrameGuideUi()
+        appSettings.save(overlay.getNormalizedPoints())
     }
 
     private fun updateFocusModeUi() {
@@ -332,6 +316,11 @@ class MainActivity : AppCompatActivity() {
             previewDisplayMode = appSettings.previewDisplayMode
         )
         overlay.isCropFrameGuideVisible = showGuide
+        overlay.cropFrameGuideLabel = if (showGuide) {
+            "${appSettings.focalLength} MM  •  ${cropGuideRatioLabel(appSettings.noCropAspectRatio)}"
+        } else {
+            null
+        }
         overlay.cropFrameGuideRect = if (showGuide) {
             CropFrameGuideModel.projectedFrameRectInView(
                 sourceAspectRatio = cameraManager.getLatestPreviewSourceAspectRatio(),
@@ -341,6 +330,18 @@ class MainActivity : AppCompatActivity() {
             )
         } else {
             null
+        }
+    }
+
+    private fun cropGuideRatioLabel(aspectRatio: Float): String {
+        return when {
+            aspectRatio <= 0f -> "FULL"
+            kotlin.math.abs(aspectRatio - 1f) < 0.001f -> "1:1"
+            kotlin.math.abs(aspectRatio - 1.5f) < 0.001f -> "3:2"
+            kotlin.math.abs(aspectRatio - 16f / 9f) < 0.001f -> "16:9"
+            kotlin.math.abs(aspectRatio - 2.35f) < 0.001f -> "2.35:1"
+            kotlin.math.abs(aspectRatio - 2.55f) < 0.001f -> "2.55:1"
+            else -> "${"%.2f".format(java.util.Locale.US, aspectRatio)}:1"
         }
     }
 
@@ -390,429 +391,38 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateEditModeButtonUi() {
         val isEditing = overlay.isEditMode
+        editModeToggle.isChecked = isEditing
         editModeToggle.alpha = if (isRectifiedMain) 0.45f else 1f
         editModeToggle.icon = ContextCompat.getDrawable(
             this,
-            if (isEditing) android.R.drawable.checkbox_on_background else android.R.drawable.ic_menu_edit
+            if (isEditing) R.drawable.ic_frame_done else R.drawable.ic_frame_edit
         )
         editModeToggle.text = ""
     }
 
-    private fun showFocalLengthDialog() {
-        val options = arrayOf("24mm (1x)", "28mm (1.17x)", "35mm (1.46x)", "40mm (1.67x)", "50mm (2.08x)")
-        val values = intArrayOf(24, 28, 35, 40, 50)
-
-        // Find current selection index
-        val currentVal = appSettings.focalLength
-        var selectedIndex = 0
-        for (i in values.indices) {
-            if (values[i] == currentVal) {
-                selectedIndex = i
-                break
-            }
-        }
-
-        MaterialAlertDialogBuilder(this)
-            .setTitle("Select Focal Length")
-            .setSingleChoiceItems(options, selectedIndex) { dialog, which ->
-                appSettings.focalLength = values[which]
-                updateCropFrameGuideUi()
-                appSettings.save(overlay.getNormalizedPoints())
-                Toast.makeText(this, "Focal Length set to ${options[which]}", Toast.LENGTH_SHORT).show()
-                dialog.dismiss()
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-
-    private fun showNoCropAspectRatioDialog() {
-        val options = arrayOf("Original", "3:2", "16:9", "2.35:1", "2.55:1", "1:1")
-        val values = floatArrayOf(0f, 1.5f, 16f / 9f, 2.35f, 2.55f, 1f)
-        val currentVal = appSettings.noCropAspectRatio
-        val selectedIndex = values.indexOfFirst { kotlin.math.abs(it - currentVal) < 0.001f }
-            .takeIf { it >= 0 } ?: 0
-
-        MaterialAlertDialogBuilder(this)
-            .setTitle("No-Crop Framing Ratio")
-            .setSingleChoiceItems(options, selectedIndex) { dialog, which ->
-                appSettings.noCropAspectRatio = values[which]
-                updateCropFrameGuideUi()
-                appSettings.save(overlay.getNormalizedPoints())
-                Toast.makeText(this, "No-Crop Ratio set to ${options[which]}", Toast.LENGTH_SHORT).show()
-                dialog.dismiss()
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-
-    private fun showAdvancedSettingsDialog() {
-        val options = arrayOf("Sports Mode", "Disable Noise Reduction", "Disable Edge Sharpening", "Chroma Noise Reduction", "Disable Crop Mode", "WDR Mode", "Enable Tap to Focus", "Show Crop Frame Guide")
-        val checkedItems = booleanArrayOf(appSettings.isSportsMode, appSettings.isNoiseReductionOff, appSettings.isEdgeModeOff, appSettings.isChromaDenoiseOn, appSettings.isCropModeOff, appSettings.isWdrMode, appSettings.isTapToFocusEnabled, appSettings.isCropFrameGuideVisible)
-
-        MaterialAlertDialogBuilder(this)
-            .setTitle("Advanced Settings")
-            .setMultiChoiceItems(options, checkedItems) { _, which, isChecked ->
-                when (which) {
-                    0 -> appSettings.isSportsMode = isChecked
-                    1 -> appSettings.isNoiseReductionOff = isChecked
-                    2 -> appSettings.isEdgeModeOff = isChecked
-                    3 -> appSettings.isChromaDenoiseOn = isChecked
-                    4 -> appSettings.isCropModeOff = isChecked
-                    5 -> appSettings.isWdrMode = isChecked
-                    6 -> appSettings.isTapToFocusEnabled = isChecked
-                    7 -> appSettings.isCropFrameGuideVisible = isChecked
-                }
-            }
-            .setPositiveButton("OK") { _, _ ->
-                appSettings.save(overlay.getNormalizedPoints())
-                cameraManager.updateCameraSettings()
-                overlay.isOverlayVisible = !appSettings.isCropModeOff
-                updateCropFrameGuideUi()
-                cameraManager.applyFocusMode()
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-
-    private fun showAspectRatioDialog() {
-        val options = arrayOf("Original", "A4 (1.414)", "Letter (1.294)", "4:3 (1.333)", "16:9 (1.778)", "Custom...")
-        val values = floatArrayOf(0f, 1.414f, 1.294f, 1.333f, 1.778f, -1f)
-
-        MaterialAlertDialogBuilder(this)
-            .setTitle("Select Target Aspect Ratio")
-            .setItems(options) { _, which ->
-                if (values[which] == -1f) {
-                    showCustomAspectRatioDialog()
-                } else {
-                    appSettings.targetAspectRatio = values[which]
-                    Toast.makeText(this, "Aspect Ratio set to ${options[which]}", Toast.LENGTH_SHORT).show()
-                    appSettings.save(overlay.getNormalizedPoints())
-                }
-            }
-            .show()
-    }
-
-    private fun showCustomAspectRatioDialog() {
-        val context = this
-        val layout = android.widget.LinearLayout(context)
-        layout.orientation = android.widget.LinearLayout.VERTICAL
-        val padding = (16 * resources.displayMetrics.density).toInt()
-        layout.setPadding(padding, padding, padding, padding)
-
-        val widthInput = android.widget.EditText(context)
-        widthInput.hint = "Width"
-        widthInput.inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
-
-        val heightInput = android.widget.EditText(context)
-        heightInput.hint = "Height"
-        heightInput.inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
-
-        layout.addView(widthInput)
-        layout.addView(heightInput)
-
-        MaterialAlertDialogBuilder(context)
-            .setTitle("Custom Aspect Ratio")
-            .setView(layout)
-            .setPositiveButton("OK") { _, _ ->
-                val wStr = widthInput.text.toString()
-                val hStr = heightInput.text.toString()
-                if (wStr.isNotEmpty() && hStr.isNotEmpty()) {
-                    try {
-                        val w = wStr.toFloat()
-                        val h = hStr.toFloat()
-                        if (w > 0 && h > 0) {
-                            val ratio = w / h
-                            appSettings.targetAspectRatio = ratio
-                            Toast.makeText(context, "Custom Ratio set to $ratio", Toast.LENGTH_SHORT).show()
-                            appSettings.save(overlay.getNormalizedPoints())
-                        } else {
-                            Toast.makeText(context, "Invalid dimensions", Toast.LENGTH_SHORT).show()
-                        }
-                    } catch (e: NumberFormatException) {
-                        Toast.makeText(context, "Invalid number format", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-
-    private fun showLutDialog() {
-        val lutOptions = loadAvailableLutOptions()
-
-        val originalLutKey = appSettings.lutName
-        val originalLut = currentLut
-
-        var selectedLutKey = originalLutKey
-        var selectedLut = currentLut
-        val lutCache = mutableMapOf<String, Lut3D?>()
-        originalLutKey?.let { lutCache[it] = originalLut }
-
-        val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_lut_preview, null)
-        val previewImage = dialogView.findViewById<ImageView>(R.id.lut_preview_image)
-        val previewName = dialogView.findViewById<TextView>(R.id.lut_preview_name)
-        val previewProgress = dialogView.findViewById<ProgressBar>(R.id.lut_preview_progress)
-        val lutList = dialogView.findViewById<ListView>(R.id.lut_list)
-
-        val adapter = ArrayAdapter(this, R.layout.item_lut_option, android.R.id.text1, lutOptions.map { it.displayName })
-        lutList.adapter = adapter
-        lutList.choiceMode = ListView.CHOICE_MODE_SINGLE
-
-        val initialKey = selectedLutKey ?: LUT_NONE_KEY
-        val initialIndex = lutOptions.indexOfFirst { it.storageKey == initialKey }.takeIf { it >= 0 } ?: 0
-        lutList.setItemChecked(initialIndex, true)
-
-        val previewBaseBitmap = captureCurrentPreviewBitmap()
-        val previewExecutor = Executors.newSingleThreadExecutor()
-        var previewRequestId = 0
-        var committed = false
-        var dialogClosed = false
-        fun selectedOptionForKey(key: String?): LutOption {
-            return lutOptions.firstOrNull { it.storageKey == (key ?: LUT_NONE_KEY) } ?: lutOptions.first()
-        }
-
-        fun renderPreview(option: LutOption, lut: Lut3D?) {
-            previewName.text = "Current: ${option.displayName}"
-            previewProgress.visibility = View.VISIBLE
-            val requestId = ++previewRequestId
-
-            previewExecutor.execute {
-                val rendered = try {
-                    lut?.let { LutUtils.applyLut(previewBaseBitmap, it) } ?: previewBaseBitmap
-                } catch (e: Exception) {
-                    Log.e(TAG, "LUT dialog preview render failed", e)
-                    previewBaseBitmap
-                }
-
-                runOnUiThread {
-                    if (dialogClosed || requestId != previewRequestId) return@runOnUiThread
-                    previewImage.setImageBitmap(rendered)
-                    previewProgress.visibility = View.GONE
-                }
-            }
-        }
-
-        fun applyTemporarySelection(index: Int) {
-            val previousKey = selectedLutKey
-            val previousLut = selectedLut
-            val option = lutOptions[index]
-
-            if (option.storageKey == LUT_NONE_KEY) {
-                selectedLutKey = null
-                selectedLut = null
-            } else {
-                val loaded = lutCache.getOrPut(option.storageKey) { loadLutOption(option) }
-                if (loaded == null) {
-                    Toast.makeText(this, "Failed to load LUT: ${option.displayName}", Toast.LENGTH_SHORT).show()
-                    val fallbackKey = previousKey ?: LUT_NONE_KEY
-                    val fallbackIndex = lutOptions.indexOfFirst { it.storageKey == fallbackKey }.takeIf { it >= 0 } ?: 0
-                    lutList.setItemChecked(fallbackIndex, true)
-                    selectedLutKey = previousKey
-                    selectedLut = previousLut
-                    return
-                }
-                selectedLutKey = option.storageKey
-                selectedLut = loaded
-            }
-
-            // Apply instantly so the camera preview updates in real time.
-            currentLut = selectedLut
-            renderPreview(selectedOptionForKey(selectedLutKey), selectedLut)
-        }
-
-        lutList.setOnItemClickListener { _, _, position, _ ->
-            applyTemporarySelection(position)
-        }
-
-        renderPreview(lutOptions[initialIndex], selectedLut)
-
-        val dialog = MaterialAlertDialogBuilder(this)
-            .setTitle("Select LUT")
-            .setView(dialogView)
-            .setPositiveButton("Apply") { _, _ ->
-                committed = true
-                appSettings.lutName = selectedLutKey
-                currentLut = selectedLut
-                appSettings.save(overlay.getNormalizedPoints())
-                val selectedOption = selectedOptionForKey(selectedLutKey)
-                val message = if (selectedLutKey == null) {
-                    "LUT cleared"
-                } else {
-                    "LUT applied: ${selectedOption.displayName}"
-                }
-                Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
-            }
-            .setNegativeButton("Cancel", null)
-            .create()
-
-        dialog.setOnDismissListener {
-            dialogClosed = true
-            previewExecutor.shutdownNow()
-            if (!committed) {
-                appSettings.lutName = originalLutKey
-                currentLut = originalLut
-            }
-        }
-
-        dialog.show()
-    }
-
-    private fun launchImportLutPicker() {
-        importLutLauncher.launch(arrayOf("text/plain", "application/octet-stream"))
-    }
-
-    private fun importLutFromUri(uri: Uri) {
-        try {
-            val parsedLut = contentResolver.openInputStream(uri)?.use { LutUtils.loadLut(it) }
-            if (parsedLut == null) {
-                Toast.makeText(this, "Invalid LUT file", Toast.LENGTH_SHORT).show()
-                return
-            }
-
-            val targetFile = copyImportedLutToPrivateStorage(uri) ?: run {
-                Toast.makeText(this, "Failed to import LUT", Toast.LENGTH_SHORT).show()
-                return
-            }
-
-            val storageKey = importedStorageKey(targetFile.name)
-            appSettings.lutName = storageKey
-            currentLut = parsedLut
-            appSettings.save(overlay.getNormalizedPoints())
-            Toast.makeText(this, "Imported LUT applied: ${targetFile.name}", Toast.LENGTH_SHORT).show()
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to import LUT", e)
-            Toast.makeText(this, "Failed to import LUT", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    private fun copyImportedLutToPrivateStorage(uri: Uri): File? {
-        val sourceName = queryDisplayName(uri)
-        val safeName = sanitizeImportedLutName(sourceName) ?: return null
-        val importedDir = ensureImportedLutDir()
-
-        val baseName = safeName.substringBeforeLast('.', safeName)
-        val ext = safeName.substringAfterLast('.', "cube")
-        var duplicateIndex = 0
-        var targetFile = File(importedDir, safeName)
-        while (targetFile.exists()) {
-            duplicateIndex += 1
-            targetFile = File(importedDir, "${baseName}_$duplicateIndex.$ext")
-        }
-
-        val copied = contentResolver.openInputStream(uri)?.use { input ->
-            targetFile.outputStream().use { output ->
-                input.copyTo(output)
-            }
-            true
-        } ?: false
-
-        return if (copied) targetFile else null
-    }
-
-    private fun queryDisplayName(uri: Uri): String? {
-        contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
-            val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-            if (nameIndex >= 0 && cursor.moveToFirst()) {
-                return cursor.getString(nameIndex)
-            }
-        }
-        return uri.lastPathSegment
-    }
-
-    private fun sanitizeImportedLutName(rawName: String?): String? {
-        val fallback = "untitled_lut_${UUID.randomUUID()}.cube"
-        val normalized = (rawName ?: fallback).substringAfterLast('/').substringAfterLast('\\').trim()
-        val safeBase = normalized.replace(Regex("[^A-Za-z0-9._-]"), "_").ifEmpty { fallback }
-        val withExt = if (safeBase.endsWith(".cube", ignoreCase = true)) safeBase else "$safeBase.cube"
-        val cleaned = withExt
-            .replace(Regex("^\\.+"), "")
-            .replace(Regex("\\.{2,}"), ".")
-            .ifEmpty { fallback }
-
-        return cleaned.takeIf { isSafeImportedFileName(it) }
-    }
-
-    private fun loadAvailableLutOptions(): List<LutOption> {
-        val options = mutableListOf(LutOption(LUT_NONE_KEY, LUT_NONE_LABEL, LutSource.NONE, null))
-        try {
-            val files = assets.list("luts")
-            files
-                ?.filter { it.endsWith(".cube", ignoreCase = true) }
-                ?.sorted()
-                ?.forEach {
-                    options.add(
-                        LutOption(
-                            storageKey = assetStorageKey(it),
-                            displayName = it,
-                            source = LutSource.ASSET,
-                            fileName = it
-                        )
-                    )
-                }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error listing assets", e)
-        }
-
-        val importedFiles = ensureImportedLutDir().listFiles()
-            ?.filter { it.isFile && it.name.endsWith(".cube", ignoreCase = true) }
-            ?.sortedBy { it.name.lowercase() }
-            .orEmpty()
-
-        for (file in importedFiles) {
-            options.add(
-                LutOption(
-                    storageKey = importedStorageKey(file.name),
-                    displayName = "Imported: ${file.name}",
-                    source = LutSource.IMPORTED,
-                    fileName = file.name
-                )
-            )
-        }
-        return options
-    }
-
-    private fun loadLutOption(option: LutOption): Lut3D? {
-        return when (option.source) {
-            LutSource.NONE -> null
-            LutSource.ASSET -> option.fileName?.let { LutUtils.loadLut(this, it) }
-            LutSource.IMPORTED -> {
-                val fileName = option.fileName ?: return null
-                val file = resolveImportedLutFile(fileName) ?: return null
-                if (!file.exists()) return null
-                file.inputStream().use { LutUtils.loadLut(it) }
-            }
-        }
-    }
-
     private fun loadLutFromStorageKey(storageKey: String): Lut3D? {
-        val option = when {
+        return when {
             storageKey.startsWith("$LUT_KEY_PREFIX_ASSET:") -> {
                 val fileName = storageKey.removePrefix("$LUT_KEY_PREFIX_ASSET:")
-                LutOption(storageKey, fileName, LutSource.ASSET, fileName)
+                LutUtils.loadLut(this, fileName)
             }
             storageKey.startsWith("$LUT_KEY_PREFIX_IMPORTED:") -> {
                 val fileName = storageKey.removePrefix("$LUT_KEY_PREFIX_IMPORTED:")
                 if (!isSafeImportedFileName(fileName)) return null
-                LutOption(storageKey, "Imported: $fileName", LutSource.IMPORTED, fileName)
+                val file = resolveImportedLutFile(fileName) ?: return null
+                if (!file.exists()) return null
+                file.inputStream().use { LutUtils.loadLut(it) }
             }
-            else -> {
-                val legacyName = storageKey
-                LutOption(assetStorageKey(legacyName), legacyName, LutSource.ASSET, legacyName)
-            }
+            else -> LutUtils.loadLut(this, storageKey)
         }
-        return loadLutOption(option)
     }
 
     private fun normalizeLutStorageKey(storedValue: String): String {
         return when {
             storedValue.startsWith("$LUT_KEY_PREFIX_ASSET:") || storedValue.startsWith("$LUT_KEY_PREFIX_IMPORTED:") -> storedValue
-            else -> assetStorageKey(storedValue)
+            else -> "$LUT_KEY_PREFIX_ASSET:$storedValue"
         }
     }
-
-    private fun assetStorageKey(fileName: String): String = "$LUT_KEY_PREFIX_ASSET:$fileName"
-
-    private fun importedStorageKey(fileName: String): String = "$LUT_KEY_PREFIX_IMPORTED:$fileName"
 
     private fun ensureImportedLutDir(): File {
         val dir = File(filesDir, IMPORTED_LUT_DIR_NAME)
@@ -838,38 +448,6 @@ class MainActivity : AppCompatActivity() {
         if (fileName.contains("..")) return false
         if (fileName.startsWith('.')) return false
         return fileName.matches(Regex("^[A-Za-z0-9._-]+\\.cube$", RegexOption.IGNORE_CASE))
-    }
-
-    private fun captureCurrentPreviewBitmap(): Bitmap {
-        val drawable = previewRectified.drawable
-        if (drawable != null) {
-            val targetW = drawable.intrinsicWidth.takeIf { it > 0 } ?: 480
-            val targetH = drawable.intrinsicHeight.takeIf { it > 0 } ?: 640
-            return drawable.toBitmap(targetW, targetH, Bitmap.Config.ARGB_8888)
-        }
-
-        val fallbackW = previewRectified.width.takeIf { it > 0 } ?: 480
-        val fallbackH = previewRectified.height.takeIf { it > 0 } ?: 640
-        return createFallbackPreviewBitmap(fallbackW, fallbackH)
-    }
-
-    private fun createFallbackPreviewBitmap(width: Int, height: Int): Bitmap {
-        val safeW = width.coerceAtLeast(1)
-        val safeH = height.coerceAtLeast(1)
-        val bitmap = Bitmap.createBitmap(safeW, safeH, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(bitmap)
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-        paint.shader = LinearGradient(
-            0f,
-            0f,
-            safeW.toFloat(),
-            safeH.toFloat(),
-            intArrayOf(Color.parseColor("#455A64"), Color.parseColor("#1C2833"), Color.parseColor("#0B0F14")),
-            floatArrayOf(0f, 0.55f, 1f),
-            Shader.TileMode.CLAMP
-        )
-        canvas.drawRect(0f, 0f, safeW.toFloat(), safeH.toFloat(), paint)
-        return bitmap
     }
 
     private fun requestPermissions() {
@@ -925,11 +503,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     companion object {
-        private const val TAG = "C1Cam"
         private const val LUT_KEY_PREFIX_ASSET = "asset"
         private const val LUT_KEY_PREFIX_IMPORTED = "imported"
-        private const val LUT_NONE_KEY = "__none__"
-        private const val LUT_NONE_LABEL = "None"
         private const val IMPORTED_LUT_DIR_NAME = "imported_luts"
         private val REQUIRED_PERMISSIONS = mutableListOf(Manifest.permission.CAMERA).apply {
             if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
@@ -938,16 +513,3 @@ class MainActivity : AppCompatActivity() {
         }.toTypedArray()
     }
 }
-
-private enum class LutSource {
-    NONE,
-    ASSET,
-    IMPORTED
-}
-
-private data class LutOption(
-    val storageKey: String,
-    val displayName: String,
-    val source: LutSource,
-    val fileName: String?
-)

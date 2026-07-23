@@ -60,14 +60,19 @@ class CameraManager(
     private var analysisFrameCounter: Long = 0L
     @Volatile
     private var latestPreviewSourceAspectRatio: Float = 3f / 4f
+    @Volatile
+    private var latestCaptureMetadata: CaptureMetadata? = null
+    @Volatile
+    private var latestStillCaptureMetadata: CaptureMetadata? = null
     val cameraExecutor: ExecutorService = Executors.newSingleThreadExecutor()
 
     fun startCamera() {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(activity)
 
+        val cameraCaptureCallback = createAfStateCaptureCallback()
         val previewBuilder = Preview.Builder()
         Camera2Interop.Extender(previewBuilder)
-            .setSessionCaptureCallback(createAfStateCaptureCallback())
+            .setSessionCaptureCallback(cameraCaptureCallback)
 
         cameraProviderFuture.addListener({
             val cameraProvider: ProcessCameraProvider = cameraProviderFuture.get()
@@ -76,9 +81,11 @@ class CameraManager(
                 it.setSurfaceProvider(viewFinder.surfaceProvider)
             }
 
-            imageCapture = ImageCapture.Builder()
+            val imageCaptureBuilder = ImageCapture.Builder()
                 .setBufferFormat(ImageFormat.YUV_420_888)
-                .build()
+            Camera2Interop.Extender(imageCaptureBuilder)
+                .setSessionCaptureCallback(cameraCaptureCallback)
+            imageCapture = imageCaptureBuilder.build()
 
             val previewAnalysisPolicy = PreviewAnalysisPolicy.forMode(appSettings.previewDisplayMode)
             imageAnalysis = createImageAnalysis(previewAnalysisPolicy)
@@ -157,6 +164,9 @@ class CameraManager(
         val points = overlay.getNormalizedPoints()
         val ratio = appSettings.targetAspectRatio
         val lut = lutProvider()
+        val captureStartedAt = System.currentTimeMillis()
+        val outputFormat = appSettings.imageOutputFormat
+        latestStillCaptureMetadata = null
 
         capture.takePicture(
             cameraExecutor,
@@ -169,20 +179,41 @@ class CameraManager(
                 }
 
                 override fun onCaptureSuccess(image: ImageProxy) {
-                    imageProcessor.processAndSaveImage(
+                    val captureMetadata = (latestStillCaptureMetadata ?: latestCaptureMetadata)?.copy(
+                        capturedAtMillis = captureStartedAt,
+                        equivalentFocalLengthMm = appSettings.focalLength,
+                        exposureCompensationEv = appSettings.evVal
+                    ) ?: CaptureMetadata(
+                        capturedAtMillis = captureStartedAt,
+                        iso = null,
+                        exposureTimeNs = null,
+                        aperture = null,
+                        physicalFocalLengthMm = null,
+                        equivalentFocalLengthMm = appSettings.focalLength,
+                        exposureCompensationEv = appSettings.evVal,
+                        isAutoWhiteBalance = null,
+                        isFlashFired = null
+                    )
+                    val saved = imageProcessor.processAndSaveImage(
                         image,
                         points,
                         viewW,
                         viewH,
                         ratio,
                         lut,
-                        appSettings.isChromaDenoiseOn,
+                        appSettings.chromaDenoiseMode,
                         appSettings.isCropModeOff,
                         appSettings.focalLength,
-                        appSettings.noCropAspectRatio
+                        appSettings.noCropAspectRatio,
+                        outputFormat,
+                        captureMetadata
                     )
                     activity.runOnUiThread {
-                        Toast.makeText(activity, "Saved to Gallery", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(
+                            activity,
+                            if (saved) "Saved to Gallery" else "Could not save photo",
+                            Toast.LENGTH_SHORT
+                        ).show()
                     }
                 }
             }
@@ -527,6 +558,32 @@ class CameraManager(
                 request: CaptureRequest,
                 result: TotalCaptureResult
             ) {
+                val whiteBalanceMode = result.get(CaptureResult.CONTROL_AWB_MODE)
+                val flashState = result.get(CaptureResult.FLASH_STATE)
+                val metadata = CaptureMetadata(
+                    capturedAtMillis = System.currentTimeMillis(),
+                    iso = result.get(CaptureResult.SENSOR_SENSITIVITY),
+                    exposureTimeNs = result.get(CaptureResult.SENSOR_EXPOSURE_TIME),
+                    aperture = result.get(CaptureResult.LENS_APERTURE),
+                    physicalFocalLengthMm = result.get(CaptureResult.LENS_FOCAL_LENGTH),
+                    equivalentFocalLengthMm = appSettings.focalLength,
+                    exposureCompensationEv = appSettings.evVal,
+                    isAutoWhiteBalance = whiteBalanceMode?.let {
+                        it == CaptureResult.CONTROL_AWB_MODE_AUTO
+                    },
+                    isFlashFired = flashState?.let {
+                        it == CaptureResult.FLASH_STATE_FIRED ||
+                        it == CaptureResult.FLASH_STATE_PARTIAL
+                    }
+                )
+                latestCaptureMetadata = metadata
+                val captureIntent = request.get(CaptureRequest.CONTROL_CAPTURE_INTENT)
+                if (captureIntent == CaptureRequest.CONTROL_CAPTURE_INTENT_STILL_CAPTURE ||
+                    captureIntent == CaptureRequest.CONTROL_CAPTURE_INTENT_ZERO_SHUTTER_LAG
+                ) {
+                    latestStillCaptureMetadata = metadata
+                }
+
                 val lensDistance = result.get(CaptureResult.LENS_FOCUS_DISTANCE)
                 if (lensDistance != null && lensDistance > 0f) {
                     latestAutoFocusDistanceDiopter = lensDistance

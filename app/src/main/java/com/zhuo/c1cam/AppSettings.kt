@@ -18,13 +18,14 @@ class AppSettings(private val context: Context) {
     var isSportsMode = false
     var isNoiseReductionOff = false
     var isEdgeModeOff = false
-    var isChromaDenoiseOn = false
+    var chromaDenoiseMode: ChromaDenoiseMode = ChromaDenoiseMode.OFF
     var isCropModeOff = false
     var isWdrMode = false
     var focalLength: Int = 24
     var noCropAspectRatio: Float = 0f
     var previewDisplayMode: PreviewDisplayMode = PreviewDisplayMode.CAMERA
     var isCropFrameGuideVisible: Boolean = false
+    var imageOutputFormat: ImageOutputFormat = ImageOutputFormat.JPEG
     var savedPoints: List<PointF>? = null
 
     init {
@@ -43,7 +44,13 @@ class AppSettings(private val context: Context) {
         isSportsMode = prefs.getBoolean(KEY_SPORTS_MODE, false)
         isNoiseReductionOff = prefs.getBoolean(KEY_NR_OFF, false)
         isEdgeModeOff = prefs.getBoolean(KEY_EDGE_OFF, false)
-        isChromaDenoiseOn = prefs.getBoolean(KEY_CHROMA_DENOISE, false)
+        chromaDenoiseMode = ChromaDenoiseMode.fromStorageValue(
+            prefs.getString(KEY_CHROMA_DENOISE_MODE, null)
+        ) ?: if (prefs.getBoolean(KEY_CHROMA_DENOISE, false)) {
+            ChromaDenoiseMode.HIGH
+        } else {
+            ChromaDenoiseMode.OFF
+        }
         isCropModeOff = prefs.getBoolean(KEY_CROP_MODE_OFF, false)
         isWdrMode = prefs.getBoolean(KEY_WDR_MODE, false)
         focalLength = prefs.getInt(KEY_FOCAL_LENGTH, 24)
@@ -52,6 +59,9 @@ class AppSettings(private val context: Context) {
             prefs.getString(KEY_PREVIEW_DISPLAY_MODE, PreviewDisplayMode.CAMERA.storageValue)
         )
         isCropFrameGuideVisible = prefs.getBoolean(KEY_CROP_FRAME_GUIDE_VISIBLE, false)
+        imageOutputFormat = ImageOutputFormat.fromStorageValue(
+            prefs.getString(KEY_IMAGE_OUTPUT_FORMAT, ImageOutputFormat.JPEG.storageValue)
+        )
 
         val pointsStr = prefs.getString(KEY_POINTS, null)
         if (pointsStr != null) {
@@ -83,13 +93,14 @@ class AppSettings(private val context: Context) {
         editor.putBoolean(KEY_SPORTS_MODE, isSportsMode)
         editor.putBoolean(KEY_NR_OFF, isNoiseReductionOff)
         editor.putBoolean(KEY_EDGE_OFF, isEdgeModeOff)
-        editor.putBoolean(KEY_CHROMA_DENOISE, isChromaDenoiseOn)
+        editor.putString(KEY_CHROMA_DENOISE_MODE, chromaDenoiseMode.storageValue)
         editor.putBoolean(KEY_CROP_MODE_OFF, isCropModeOff)
         editor.putBoolean(KEY_WDR_MODE, isWdrMode)
         editor.putInt(KEY_FOCAL_LENGTH, focalLength)
         editor.putFloat(KEY_NO_CROP_ASPECT_RATIO, noCropAspectRatio)
         editor.putString(KEY_PREVIEW_DISPLAY_MODE, previewDisplayMode.storageValue)
         editor.putBoolean(KEY_CROP_FRAME_GUIDE_VISIBLE, isCropFrameGuideVisible)
+        editor.putString(KEY_IMAGE_OUTPUT_FORMAT, imageOutputFormat.storageValue)
 
         if (currentPoints.size == 4) {
             val sb = StringBuilder()
@@ -118,11 +129,13 @@ class AppSettings(private val context: Context) {
         private const val KEY_NR_OFF = "nr_off"
         private const val KEY_EDGE_OFF = "edge_off"
         private const val KEY_CHROMA_DENOISE = "chroma_denoise_on"
+        private const val KEY_CHROMA_DENOISE_MODE = "chroma_denoise_mode"
         private const val KEY_CROP_MODE_OFF = "crop_mode_off"
         private const val KEY_WDR_MODE = "wdr_mode"
         private const val KEY_FOCAL_LENGTH = "focal_length"
         private const val KEY_NO_CROP_ASPECT_RATIO = "no_crop_aspect_ratio"
         private const val KEY_PREVIEW_DISPLAY_MODE = "preview_display_mode"
         private const val KEY_CROP_FRAME_GUIDE_VISIBLE = "crop_frame_guide_visible"
+        private const val KEY_IMAGE_OUTPUT_FORMAT = "image_output_format"
     }
 }

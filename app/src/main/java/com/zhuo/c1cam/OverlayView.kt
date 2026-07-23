@@ -3,11 +3,11 @@ package com.zhuo.c1cam
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.CornerPathEffect
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PointF
 import android.graphics.RectF
+import android.graphics.Typeface
 import android.os.SystemClock
 import android.util.AttributeSet
 import android.view.GestureDetector
@@ -62,6 +62,10 @@ class OverlayView @JvmOverloads constructor(
     private val cropFrameRect = RectF()
     private val cropFramePath = Path()
     private val cropFrameCornerPath = Path()
+    private val cropFrameMaskPaint = Paint().apply {
+        color = Color.argb(72, 0, 0, 0)
+        style = Paint.Style.FILL
+    }
     private val focusIndicatorPaint = Paint().apply {
         color = Color.WHITE
         style = Paint.Style.STROKE
@@ -69,18 +73,32 @@ class OverlayView @JvmOverloads constructor(
         isAntiAlias = true
     }
     private val cropFramePaint = Paint().apply {
-        color = Color.argb(230, 245, 245, 235)
+        color = Color.argb(185, 255, 255, 255)
         style = Paint.Style.STROKE
-        strokeWidth = 3f
+        strokeWidth = dp(1f)
         isAntiAlias = true
-        pathEffect = CornerPathEffect(6f)
+    }
+    private val cropFrameGridPaint = Paint().apply {
+        color = Color.argb(72, 255, 255, 255)
+        style = Paint.Style.STROKE
+        strokeWidth = dp(0.75f)
+        isAntiAlias = true
     }
     private val cropFrameCornerPaint = Paint().apply {
-        color = Color.argb(255, 255, 250, 240)
+        color = Color.rgb(214, 255, 66)
         style = Paint.Style.STROKE
-        strokeWidth = 6f
-        strokeCap = Paint.Cap.SQUARE
+        strokeWidth = dp(3f)
+        strokeCap = Paint.Cap.ROUND
         isAntiAlias = true
+    }
+    private val cropFrameLabelBackgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.argb(220, 8, 10, 12)
+        style = Paint.Style.FILL
+    }
+    private val cropFrameLabelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.rgb(214, 255, 66)
+        textSize = dp(10f)
+        typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
     }
 
     // 4 points in view coordinates
@@ -111,6 +129,12 @@ class OverlayView @JvmOverloads constructor(
         }
 
     var cropFrameGuideRect: CropFrameGuideRect? = null
+        set(value) {
+            field = value
+            invalidate()
+        }
+
+    var cropFrameGuideLabel: String? = null
         set(value) {
             field = value
             invalidate()
@@ -182,17 +206,74 @@ class OverlayView @JvmOverloads constructor(
 
         if (cropFrameRect.width() <= 1f || cropFrameRect.height() <= 1f) return
 
+        val edgeInset = dp(1.5f)
+        cropFrameRect.inset(edgeInset, edgeInset)
+
+        canvas.drawRect(0f, 0f, width.toFloat(), cropFrameRect.top, cropFrameMaskPaint)
+        canvas.drawRect(0f, cropFrameRect.bottom, width.toFloat(), height.toFloat(), cropFrameMaskPaint)
+        canvas.drawRect(0f, cropFrameRect.top, cropFrameRect.left, cropFrameRect.bottom, cropFrameMaskPaint)
+        canvas.drawRect(cropFrameRect.right, cropFrameRect.top, width.toFloat(), cropFrameRect.bottom, cropFrameMaskPaint)
+
         cropFramePath.rewind()
         cropFramePath.addRect(cropFrameRect, Path.Direction.CW)
         canvas.drawPath(cropFramePath, cropFramePaint)
 
-        val cornerLength = minOf(cropFrameRect.width(), cropFrameRect.height()) * 0.12f
-            .coerceAtLeast(24f)
-            .coerceAtMost(72f)
+        val thirdX = cropFrameRect.width() / 3f
+        val thirdY = cropFrameRect.height() / 3f
+        canvas.drawLine(
+            cropFrameRect.left + thirdX,
+            cropFrameRect.top,
+            cropFrameRect.left + thirdX,
+            cropFrameRect.bottom,
+            cropFrameGridPaint
+        )
+        canvas.drawLine(
+            cropFrameRect.left + thirdX * 2f,
+            cropFrameRect.top,
+            cropFrameRect.left + thirdX * 2f,
+            cropFrameRect.bottom,
+            cropFrameGridPaint
+        )
+        canvas.drawLine(
+            cropFrameRect.left,
+            cropFrameRect.top + thirdY,
+            cropFrameRect.right,
+            cropFrameRect.top + thirdY,
+            cropFrameGridPaint
+        )
+        canvas.drawLine(
+            cropFrameRect.left,
+            cropFrameRect.top + thirdY * 2f,
+            cropFrameRect.right,
+            cropFrameRect.top + thirdY * 2f,
+            cropFrameGridPaint
+        )
+
+        val cornerLength = (minOf(cropFrameRect.width(), cropFrameRect.height()) * 0.13f)
+            .coerceAtLeast(dp(22f))
+            .coerceAtMost(dp(54f))
 
         cropFrameCornerPath.rewind()
         addCornerMarks(cropFrameCornerPath, cropFrameRect, cornerLength)
         canvas.drawPath(cropFrameCornerPath, cropFrameCornerPaint)
+
+        drawCropFrameLabel(canvas)
+    }
+
+    private fun drawCropFrameLabel(canvas: Canvas) {
+        val label = cropFrameGuideLabel?.takeIf { it.isNotBlank() } ?: return
+        val horizontalPadding = dp(10f)
+        val labelHeight = dp(25f)
+        val labelWidth = cropFrameLabelPaint.measureText(label) + horizontalPadding * 2f
+        val left = (cropFrameRect.left + dp(10f))
+            .coerceAtMost((cropFrameRect.right - labelWidth - dp(6f)).coerceAtLeast(cropFrameRect.left))
+        val top = cropFrameRect.top + dp(10f)
+        val labelRect = RectF(left, top, left + labelWidth, top + labelHeight)
+
+        canvas.drawRoundRect(labelRect, labelHeight / 2f, labelHeight / 2f, cropFrameLabelBackgroundPaint)
+        val baseline = labelRect.centerY() -
+            (cropFrameLabelPaint.ascent() + cropFrameLabelPaint.descent()) / 2f
+        canvas.drawText(label, labelRect.left + horizontalPadding, baseline, cropFrameLabelPaint)
     }
 
     private fun addCornerMarks(path: Path, rect: RectF, length: Float) {
@@ -313,4 +394,6 @@ class OverlayView @JvmOverloads constructor(
             }
         }
     }
+
+    private fun dp(value: Float): Float = value * resources.displayMetrics.density
 }

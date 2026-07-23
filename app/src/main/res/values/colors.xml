@@ -2,13 +2,20 @@
 <resources>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
-    <color name="cam_bg_start">#111620</color>
-    <color name="cam_bg_end">#05070B</color>
-    <color name="cam_panel_bg">#CC1A222B</color>
-    <color name="cam_panel_bg_soft">#A61A222B</color>
-    <color name="cam_panel_stroke">#4DFFFFFF</color>
-    <color name="cam_accent">#7FE8C9</color>
-    <color name="cam_accent_soft">#66A6FFE8</color>
-    <color name="cam_text_primary">#F5F8FF</color>
-    <color name="cam_text_secondary">#B8C5D8</color>
+    <color name="cam_bg_start">#14171A</color>
+    <color name="cam_bg_end">#050607</color>
+    <color name="cam_chrome">#FF090B0D</color>
+    <color name="cam_surface">#FF15181B</color>
+    <color name="cam_surface_high">#FF1D2125</color>
+    <color name="cam_panel_bg">#F2131619</color>
+    <color name="cam_panel_bg_soft">#E616191C</color>
+    <color name="cam_panel_stroke">#28FFFFFF</color>
+    <color name="cam_control_stroke">#42FFFFFF</color>
+    <color name="cam_track_inactive">#36FFFFFF</color>
+    <color name="cam_accent">#D6FF42</color>
+    <color name="cam_accent_soft">#40D6FF42</color>
+    <color name="cam_text_primary">#F6F7F8</color>
+    <color name="cam_text_secondary">#9CA3A9</color>
+    <color name="cam_text_tertiary">#6F777E</color>
+    <color name="cam_danger">#FF7A72</color>
 </resources>

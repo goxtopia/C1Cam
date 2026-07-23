@@ -1,3 +1,8 @@
 <resources>
     <string name="app_name">C1Cam</string>
+    <string name="settings">Settings</string>
+    <string name="edit_frame">Edit perspective frame</string>
+    <string name="toggle_preview">Toggle camera and processed preview</string>
+    <string name="processed_preview">Processed camera preview</string>
+    <string name="capture">Capture photo</string>
 </resources>

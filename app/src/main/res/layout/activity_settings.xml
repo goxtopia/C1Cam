@@ -1,0 +1,574 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/settings_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/bg_settings_page"
+    tools:context=".SettingsActivity">
+
+    <LinearLayout
+        android:id="@+id/settings_main_page"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="64dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="10dp"
+            android:paddingEnd="18dp">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/settings_back"
+                style="@style/Widget.Material3.Button.IconButton"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="@drawable/bg_settings_icon"
+                android:contentDescription="Back"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
+                app:icon="@drawable/ic_back"
+                app:iconGravity="textStart"
+                app:iconPadding="0dp"
+                app:iconTint="@color/cam_text_primary"
+                app:strokeWidth="0dp" />
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="14dp"
+                android:layout_weight="1"
+                android:fontFamily="sans-serif-medium"
+                android:text="Camera settings"
+                android:textColor="@color/cam_text_primary"
+                android:textSize="20sp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFamily="sans-serif-medium"
+                android:letterSpacing="0.12"
+                android:text="C1"
+                android:textColor="@color/cam_accent"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <androidx.core.widget.NestedScrollView
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:clipToPadding="false"
+            android:fillViewport="true">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingStart="16dp"
+                android:paddingTop="12dp"
+                android:paddingEnd="16dp"
+                android:paddingBottom="36dp">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="sans-serif-light"
+                    android:text="Tune the frame, color and capture pipeline."
+                    android:textColor="@color/cam_text_secondary"
+                    android:textSize="15sp" />
+
+                <TextView
+                    style="@style/C1_SettingsSectionLabel"
+                    android:text="FRAMING &amp; LENS" />
+
+                <com.google.android.material.card.MaterialCardView
+                    style="@style/C1_SettingsCard">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical">
+
+                        <LinearLayout
+                            android:id="@+id/target_ratio_row"
+                            style="@style/C1_SettingsRow">
+
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:orientation="vertical">
+
+                                <TextView
+                                    style="@style/C1_SettingsTitle"
+                                    android:text="Target aspect ratio" />
+
+                                <TextView
+                                    style="@style/C1_SettingsSubtitle"
+                                    android:text="Output after perspective correction" />
+                            </LinearLayout>
+
+                            <TextView
+                                android:id="@+id/target_ratio_value"
+                                style="@style/C1_SettingsValue"
+                                tools:text="A4" />
+
+                            <ImageView
+                                style="@style/C1_SettingsChevron" />
+                        </LinearLayout>
+
+                        <View style="@style/C1_SettingsDivider" />
+
+                        <LinearLayout
+                            android:id="@+id/focal_length_row"
+                            style="@style/C1_SettingsRow">
+
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:orientation="vertical">
+
+                                <TextView
+                                    style="@style/C1_SettingsTitle"
+                                    android:text="Equivalent focal length" />
+
+                                <TextView
+                                    style="@style/C1_SettingsSubtitle"
+                                    android:text="Controls the framing projection" />
+                            </LinearLayout>
+
+                            <TextView
+                                android:id="@+id/focal_length_value"
+                                style="@style/C1_SettingsValue"
+                                tools:text="24 mm" />
+
+                            <ImageView style="@style/C1_SettingsChevron" />
+                        </LinearLayout>
+
+                        <View style="@style/C1_SettingsDivider" />
+
+                        <LinearLayout
+                            android:id="@+id/no_crop_ratio_row"
+                            style="@style/C1_SettingsRow">
+
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:orientation="vertical">
+
+                                <TextView
+                                    style="@style/C1_SettingsTitle"
+                                    android:text="No-crop framing ratio" />
+
+                                <TextView
+                                    style="@style/C1_SettingsSubtitle"
+                                    android:text="Guide used when crop mode is off" />
+                            </LinearLayout>
+
+                            <TextView
+                                android:id="@+id/no_crop_ratio_value"
+                                style="@style/C1_SettingsValue"
+                                tools:text="Original" />
+
+                            <ImageView style="@style/C1_SettingsChevron" />
+                        </LinearLayout>
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <TextView
+                    style="@style/C1_SettingsSectionLabel"
+                    android:text="COLOR" />
+
+                <com.google.android.material.card.MaterialCardView
+                    style="@style/C1_SettingsCard">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical">
+
+                        <LinearLayout
+                            android:id="@+id/lut_row"
+                            style="@style/C1_SettingsRow">
+
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:orientation="vertical">
+
+                                <TextView
+                                    style="@style/C1_SettingsTitle"
+                                    android:text="Color profile" />
+
+                                <TextView
+                                    style="@style/C1_SettingsSubtitle"
+                                    android:text="Apply a LUT to preview and capture" />
+                            </LinearLayout>
+
+                            <TextView
+                                android:id="@+id/lut_value"
+                                style="@style/C1_SettingsValue"
+                                android:maxWidth="110dp"
+                                android:ellipsize="end"
+                                android:singleLine="true"
+                                tools:text="None" />
+
+                            <ImageView style="@style/C1_SettingsChevron" />
+                        </LinearLayout>
+
+                        <View style="@style/C1_SettingsDivider" />
+
+                        <LinearLayout
+                            android:id="@+id/import_lut_row"
+                            style="@style/C1_SettingsRow">
+
+                            <ImageView
+                                android:layout_width="42dp"
+                                android:layout_height="42dp"
+                                android:background="@drawable/bg_settings_icon"
+                                android:contentDescription="Import LUT"
+                                android:padding="9dp"
+                                android:src="@drawable/ic_import" />
+
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_marginStart="14dp"
+                                android:layout_weight="1"
+                                android:orientation="vertical">
+
+                                <TextView
+                                    style="@style/C1_SettingsTitle"
+                                    android:text="Import LUT" />
+
+                                <TextView
+                                    style="@style/C1_SettingsSubtitle"
+                                    android:text=".cube files are stored on this device" />
+                            </LinearLayout>
+
+                            <ImageView style="@style/C1_SettingsChevron" />
+                        </LinearLayout>
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <TextView
+                    style="@style/C1_SettingsSectionLabel"
+                    android:text="OUTPUT" />
+
+                <com.google.android.material.card.MaterialCardView
+                    style="@style/C1_SettingsCard">
+
+                    <LinearLayout
+                        android:id="@+id/output_format_row"
+                        style="@style/C1_SettingsRow">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                style="@style/C1_SettingsTitle"
+                                android:text="File format" />
+
+                            <TextView
+                                style="@style/C1_SettingsSubtitle"
+                                android:text="JPEG includes capture metadata" />
+                        </LinearLayout>
+
+                        <TextView
+                            android:id="@+id/output_format_value"
+                            style="@style/C1_SettingsValue"
+                            tools:text="JPEG" />
+
+                        <ImageView style="@style/C1_SettingsChevron" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <TextView
+                    style="@style/C1_SettingsSectionLabel"
+                    android:text="CAPTURE ASSISTS" />
+
+                <com.google.android.material.card.MaterialCardView
+                    style="@style/C1_SettingsCard">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical">
+
+                        <LinearLayout style="@style/C1_SettingsSwitchRow">
+
+                            <TextView
+                                style="@style/C1_SettingsSwitchLabel"
+                                android:text="Tap to focus" />
+
+                            <com.google.android.material.materialswitch.MaterialSwitch
+                                android:id="@+id/tap_focus_switch"
+                                style="@style/C1_SettingsSwitch" />
+                        </LinearLayout>
+
+                        <View style="@style/C1_SettingsDivider" />
+
+                        <LinearLayout style="@style/C1_SettingsSwitchRow">
+
+                            <TextView
+                                style="@style/C1_SettingsSwitchLabel"
+                                android:text="Crop frame guide" />
+
+                            <com.google.android.material.materialswitch.MaterialSwitch
+                                android:id="@+id/frame_guide_switch"
+                                style="@style/C1_SettingsSwitch" />
+                        </LinearLayout>
+
+                        <View style="@style/C1_SettingsDivider" />
+
+                        <LinearLayout style="@style/C1_SettingsSwitchRow">
+
+                            <TextView
+                                style="@style/C1_SettingsSwitchLabel"
+                                android:text="Disable crop mode" />
+
+                            <com.google.android.material.materialswitch.MaterialSwitch
+                                android:id="@+id/crop_mode_off_switch"
+                                style="@style/C1_SettingsSwitch" />
+                        </LinearLayout>
+
+                        <View style="@style/C1_SettingsDivider" />
+
+                        <LinearLayout style="@style/C1_SettingsSwitchRow">
+
+                            <TextView
+                                style="@style/C1_SettingsSwitchLabel"
+                                android:text="Sports mode" />
+
+                            <com.google.android.material.materialswitch.MaterialSwitch
+                                android:id="@+id/sports_switch"
+                                style="@style/C1_SettingsSwitch" />
+                        </LinearLayout>
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <TextView
+                    style="@style/C1_SettingsSectionLabel"
+                    android:text="IMAGE PIPELINE" />
+
+                <com.google.android.material.card.MaterialCardView
+                    style="@style/C1_SettingsCard">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical">
+
+                        <LinearLayout style="@style/C1_SettingsSwitchRow">
+
+                            <TextView
+                                style="@style/C1_SettingsSwitchLabel"
+                                android:text="Wide dynamic range" />
+
+                            <com.google.android.material.materialswitch.MaterialSwitch
+                                android:id="@+id/wdr_switch"
+                                style="@style/C1_SettingsSwitch" />
+                        </LinearLayout>
+
+                        <View style="@style/C1_SettingsDivider" />
+
+                        <LinearLayout
+                            android:id="@+id/chroma_denoise_row"
+                            style="@style/C1_SettingsRow">
+
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:orientation="vertical">
+
+                                <TextView
+                                    style="@style/C1_SettingsTitle"
+                                    android:text="Chroma noise reduction" />
+
+                                <TextView
+                                    style="@style/C1_SettingsSubtitle"
+                                    android:text="Auto adapts strength to capture ISO" />
+                            </LinearLayout>
+
+                            <TextView
+                                android:id="@+id/chroma_denoise_value"
+                                style="@style/C1_SettingsValue"
+                                tools:text="Auto" />
+
+                            <ImageView style="@style/C1_SettingsChevron" />
+                        </LinearLayout>
+
+                        <View style="@style/C1_SettingsDivider" />
+
+                        <LinearLayout style="@style/C1_SettingsSwitchRow">
+
+                            <TextView
+                                style="@style/C1_SettingsSwitchLabel"
+                                android:text="Disable system noise reduction" />
+
+                            <com.google.android.material.materialswitch.MaterialSwitch
+                                android:id="@+id/noise_reduction_off_switch"
+                                style="@style/C1_SettingsSwitch" />
+                        </LinearLayout>
+
+                        <View style="@style/C1_SettingsDivider" />
+
+                        <LinearLayout style="@style/C1_SettingsSwitchRow">
+
+                            <TextView
+                                style="@style/C1_SettingsSwitchLabel"
+                                android:text="Disable edge sharpening" />
+
+                            <com.google.android.material.materialswitch.MaterialSwitch
+                                android:id="@+id/edge_off_switch"
+                                style="@style/C1_SettingsSwitch" />
+                        </LinearLayout>
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="18dp"
+                    android:gravity="center"
+                    android:text="Changes are saved automatically"
+                    android:textColor="@color/cam_text_tertiary"
+                    android:textSize="12sp" />
+            </LinearLayout>
+        </androidx.core.widget.NestedScrollView>
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/settings_selection_panel"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@drawable/bg_settings_page"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="64dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="10dp"
+            android:paddingEnd="18dp">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/selection_back"
+                style="@style/Widget.Material3.Button.IconButton"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="@drawable/bg_settings_icon"
+                android:contentDescription="Back to settings"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
+                app:icon="@drawable/ic_back"
+                app:iconGravity="textStart"
+                app:iconPadding="0dp"
+                app:iconTint="@color/cam_text_primary"
+                app:strokeWidth="0dp" />
+
+            <TextView
+                android:id="@+id/selection_title"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="14dp"
+                android:layout_weight="1"
+                android:fontFamily="sans-serif-medium"
+                android:textColor="@color/cam_text_primary"
+                android:textSize="20sp"
+                tools:text="Target aspect ratio" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/selection_hint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingStart="22dp"
+            android:paddingTop="12dp"
+            android:paddingEnd="22dp"
+            android:paddingBottom="12dp"
+            android:textColor="@color/cam_text_secondary"
+            android:textSize="14sp"
+            tools:text="Choose one option" />
+
+        <ListView
+            android:id="@+id/selection_list"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:choiceMode="singleChoice"
+            android:divider="#18FFFFFF"
+            android:dividerHeight="1dp"
+            android:listSelector="@android:color/transparent"
+            android:overScrollMode="never" />
+
+        <LinearLayout
+            android:id="@+id/custom_ratio_form"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:paddingStart="22dp"
+            android:paddingTop="22dp"
+            android:paddingEnd="22dp"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Enter the frame dimensions"
+                android:textColor="@color/cam_text_secondary"
+                android:textSize="14sp" />
+
+            <EditText
+                android:id="@+id/custom_width_input"
+                android:layout_width="match_parent"
+                android:layout_height="58dp"
+                android:layout_marginTop="20dp"
+                android:background="@drawable/bg_settings_input"
+                android:hint="Width"
+                android:inputType="numberDecimal"
+                android:textColor="@color/cam_text_primary"
+                android:textColorHint="@color/cam_text_tertiary" />
+
+            <EditText
+                android:id="@+id/custom_height_input"
+                android:layout_width="match_parent"
+                android:layout_height="58dp"
+                android:layout_marginTop="12dp"
+                android:background="@drawable/bg_settings_input"
+                android:hint="Height"
+                android:inputType="numberDecimal"
+                android:textColor="@color/cam_text_primary"
+                android:textColorHint="@color/cam_text_tertiary" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/custom_ratio_apply"
+                android:layout_width="match_parent"
+                android:layout_height="54dp"
+                android:layout_marginTop="22dp"
+                android:text="Apply ratio"
+                android:textColor="@color/cam_bg_end"
+                app:backgroundTint="@color/cam_accent"
+                app:cornerRadius="18dp" />
+        </LinearLayout>
+    </LinearLayout>
+
+</FrameLayout>
