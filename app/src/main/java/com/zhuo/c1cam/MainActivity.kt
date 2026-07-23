@@ -9,6 +9,7 @@ import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
 import android.view.KeyEvent
+import android.view.Surface
 import android.view.View
 import android.widget.Button
 import android.widget.ImageView
@@ -41,6 +42,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var bottomControls: View
     private lateinit var mainViewContainer: android.widget.FrameLayout
     private lateinit var cameraContainer: View
+    private lateinit var deviceOrientationManager: DeviceOrientationManager
+    private lateinit var orientationAwareControls: List<View>
 
     private var isFullscreen = false
     private var isRectifiedMain = false
@@ -127,8 +130,28 @@ class MainActivity : AppCompatActivity() {
             overlay = overlay,
             appSettings = appSettings,
             imageProcessor = imageProcessor,
-            lutProvider = { currentLut }
+            lutProvider = { currentLut },
+            onPreviewSourceAspectRatioChanged = { updateCropFrameGuideUi() }
         )
+        orientationAwareControls = listOf<View>(
+            findViewById<View>(R.id.brand_mark),
+            editModeToggle,
+            previewDisplayToggle,
+            settingsButton,
+            findViewById<View>(R.id.ev_label),
+            findViewById<View>(R.id.focus_label),
+            focusModeButton,
+            aeLockButton,
+            afLockButton
+        )
+        deviceOrientationManager = DeviceOrientationManager(this) { rotation ->
+            runOnUiThread {
+                // Physical device orientation is only used to keep the controls upright.
+                // CameraX must follow the app display orientation; otherwise a landscape
+                // grip can rotate the crop/LUT while the activity itself is still portrait.
+                rotateControlsToRemainUpright(rotation)
+            }
+        }
 
         // Restore UI values
         focusSlider.value = appSettings.focusVal
@@ -355,7 +378,9 @@ class MainActivity : AppCompatActivity() {
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) {
-            updateCropFrameGuideUi()
+            // The display rotation can settle after onStart when returning from the
+            // background. Re-read it once the activity window is actually focused.
+            syncOrientationFromDisplay()
         }
     }
 
@@ -464,9 +489,53 @@ class MainActivity : AppCompatActivity() {
         cameraManager.shutdown()
     }
 
+    override fun onStart() {
+        super.onStart()
+        syncOrientationFromDisplay()
+        deviceOrientationManager.start()
+    }
+
     override fun onStop() {
+        deviceOrientationManager.stop()
         super.onStop()
         appSettings.save(overlay.getNormalizedPoints())
+    }
+
+    @Suppress("DEPRECATION")
+    private fun syncOrientationFromDisplay() {
+        val displayRotation = viewFinder.display?.rotation
+            ?: windowManager.defaultDisplay.rotation
+        cameraManager.updateTargetRotation(displayRotation)
+        rotateControlsToRemainUpright(displayRotation)
+        viewFinder.post { updateCropFrameGuideUi() }
+    }
+
+    private fun rotateControlsToRemainUpright(deviceRotation: Int) {
+        val displayRotation = viewFinder.display?.rotation ?: Surface.ROTATION_0
+        val relativeDegrees = normalizeRotationDegrees(
+            surfaceRotationDegrees(deviceRotation) - surfaceRotationDegrees(displayRotation)
+        )
+        val controlRotation = relativeDegrees.toFloat()
+
+        orientationAwareControls.forEach { view ->
+            view.animate()
+                .rotation(controlRotation)
+                .setDuration(ORIENTATION_ANIMATION_DURATION_MS)
+                .start()
+        }
+    }
+
+    private fun surfaceRotationDegrees(rotation: Int): Int {
+        return when (rotation) {
+            Surface.ROTATION_90 -> 90
+            Surface.ROTATION_180 -> 180
+            Surface.ROTATION_270 -> 270
+            else -> 0
+        }
+    }
+
+    private fun normalizeRotationDegrees(degrees: Int): Int {
+        return ((degrees + 540) % 360) - 180
     }
 
     private fun toggleFullscreen() {
@@ -506,6 +575,7 @@ class MainActivity : AppCompatActivity() {
         private const val LUT_KEY_PREFIX_ASSET = "asset"
         private const val LUT_KEY_PREFIX_IMPORTED = "imported"
         private const val IMPORTED_LUT_DIR_NAME = "imported_luts"
+        private const val ORIENTATION_ANIMATION_DURATION_MS = 220L
         private val REQUIRED_PERMISSIONS = mutableListOf(Manifest.permission.CAMERA).apply {
             if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
                 add(Manifest.permission.WRITE_EXTERNAL_STORAGE)

@@ -9,6 +9,7 @@ import android.hardware.camera2.CaptureResult
 import android.hardware.camera2.TotalCaptureResult
 import android.util.Log
 import android.util.Size
+import android.view.Surface
 import android.widget.ImageView
 import android.widget.Toast
 import androidx.annotation.OptIn
@@ -48,11 +49,13 @@ class CameraManager(
     private val overlay: OverlayView,
     private val appSettings: AppSettings,
     private val imageProcessor: ImageProcessor,
-    private val lutProvider: () -> Lut3D?
+    private val lutProvider: () -> Lut3D?,
+    private val onPreviewSourceAspectRatioChanged: () -> Unit
 ) {
 
     private var imageCapture: ImageCapture? = null
     private var imageAnalysis: ImageAnalysis? = null
+    private var preview: Preview? = null
     private var camera: Camera? = null
     private var latestTapToFocusRequestId: Long = 0L
     private var latestAutoFocusDistanceDiopter: Float? = null
@@ -64,40 +67,47 @@ class CameraManager(
     private var latestCaptureMetadata: CaptureMetadata? = null
     @Volatile
     private var latestStillCaptureMetadata: CaptureMetadata? = null
+    @Volatile
+    private var targetRotation: Int = Surface.ROTATION_0
     val cameraExecutor: ExecutorService = Executors.newSingleThreadExecutor()
 
     fun startCamera() {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(activity)
 
         val cameraCaptureCallback = createAfStateCaptureCallback()
-        val previewBuilder = Preview.Builder()
-        Camera2Interop.Extender(previewBuilder)
-            .setSessionCaptureCallback(cameraCaptureCallback)
 
         cameraProviderFuture.addListener({
             val cameraProvider: ProcessCameraProvider = cameraProviderFuture.get()
 
-            val preview = previewBuilder.build().also {
+            val previewBuilder = Preview.Builder()
+                .setTargetRotation(targetRotation)
+            Camera2Interop.Extender(previewBuilder)
+                .setSessionCaptureCallback(cameraCaptureCallback)
+            val previewUseCase = previewBuilder.build().also {
                 it.setSurfaceProvider(viewFinder.surfaceProvider)
             }
+            preview = previewUseCase
 
             val imageCaptureBuilder = ImageCapture.Builder()
                 .setBufferFormat(ImageFormat.YUV_420_888)
+                .setTargetRotation(targetRotation)
             Camera2Interop.Extender(imageCaptureBuilder)
                 .setSessionCaptureCallback(cameraCaptureCallback)
-            imageCapture = imageCaptureBuilder.build()
+            val imageCaptureUseCase = imageCaptureBuilder.build()
+            imageCapture = imageCaptureUseCase
 
             val previewAnalysisPolicy = PreviewAnalysisPolicy.forMode(appSettings.previewDisplayMode)
-            imageAnalysis = createImageAnalysis(previewAnalysisPolicy)
+            val imageAnalysisUseCase = createImageAnalysis(previewAnalysisPolicy)
+            imageAnalysis = imageAnalysisUseCase
             analysisFrameCounter = 0L
 
-            imageAnalysis?.setAnalyzer(cameraExecutor) { imageProxy ->
+            imageAnalysisUseCase.setAnalyzer(cameraExecutor) { imageProxy ->
                 val frameIndex = ++analysisFrameCounter
-                latestPreviewSourceAspectRatio = PreviewFrameAspectRatioModel.fromFrame(
+                updateLatestPreviewSourceAspectRatio(PreviewFrameAspectRatioModel.fromFrame(
                     width = imageProxy.width,
                     height = imageProxy.height,
                     rotationDegrees = imageProxy.imageInfo.rotationDegrees
-                )
+                ))
                 if (!previewAnalysisPolicy.shouldProcessFrame(frameIndex)) {
                     imageProxy.close()
                     return@setAnalyzer
@@ -136,7 +146,11 @@ class CameraManager(
                 cameraProvider.unbindAll()
 
                 camera = cameraProvider.bindToLifecycle(
-                    activity, cameraSelector, preview, imageCapture, imageAnalysis
+                    activity,
+                    cameraSelector,
+                    previewUseCase,
+                    imageCaptureUseCase,
+                    imageAnalysisUseCase
                 )
 
                 updateCameraSettings()
@@ -155,6 +169,19 @@ class CameraManager(
     }
 
     fun getLatestPreviewSourceAspectRatio(): Float = latestPreviewSourceAspectRatio
+
+    fun updateTargetRotation(rotation: Int) {
+        targetRotation = rotation
+        preview?.targetRotation = rotation
+        imageCapture?.targetRotation = rotation
+        imageAnalysis?.targetRotation = rotation
+    }
+
+    private fun updateLatestPreviewSourceAspectRatio(aspectRatio: Float) {
+        if (kotlin.math.abs(aspectRatio - latestPreviewSourceAspectRatio) < 0.001f) return
+        latestPreviewSourceAspectRatio = aspectRatio
+        activity.runOnUiThread(onPreviewSourceAspectRatioChanged)
+    }
 
     fun takePhoto() {
         val capture = imageCapture ?: return
@@ -232,6 +259,7 @@ class CameraManager(
 
         return ImageAnalysis.Builder()
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+            .setTargetRotation(targetRotation)
             .setResolutionSelector(
                 ResolutionSelector.Builder()
                     .setResolutionStrategy(resolutionStrategy)
