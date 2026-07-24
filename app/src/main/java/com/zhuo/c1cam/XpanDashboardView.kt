@@ -5,6 +5,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.RadialGradient
 import android.graphics.RectF
 import android.graphics.LinearGradient
 import android.graphics.Shader
@@ -40,6 +41,7 @@ class XpanDashboardView @JvmOverloads constructor(
     }
     private val histogramPath = Path()
     private val histogramTracePath = Path()
+    private val levelPath = Path()
     private val backgroundPaint = Paint()
 
     private var isActive = false
@@ -124,7 +126,6 @@ class XpanDashboardView @JvmOverloads constructor(
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), backgroundPaint)
-        drawPanelTexture(canvas)
         drawHeader(canvas)
         drawLevel(canvas)
         drawHistogram(canvas)
@@ -145,31 +146,6 @@ class XpanDashboardView @JvmOverloads constructor(
             floatArrayOf(0f, 0.56f, 1f),
             Shader.TileMode.CLAMP
         )
-    }
-
-    private fun drawPanelTexture(canvas: Canvas) {
-        linePaint.strokeWidth = dp(1f)
-        linePaint.color = Color.argb(11, 246, 247, 248)
-        val spacing = dp(28f)
-        var y = dp(14f)
-        while (y < height) {
-            canvas.drawLine(0f, y, width.toFloat(), y, linePaint)
-            y += spacing
-        }
-
-        fillPaint.color = Color.argb(30, 214, 255, 66)
-        val dotSpacing = dp(32f)
-        var dotY = dp(16f)
-        var row = 0
-        while (dotY < height) {
-            var dotX = if (row % 2 == 0) dp(14f) else dp(30f)
-            while (dotX < width) {
-                canvas.drawCircle(dotX, dotY, dp(0.65f), fillPaint)
-                dotX += dotSpacing
-            }
-            dotY += dotSpacing
-            row += 1
-        }
     }
 
     private fun drawHeader(canvas: Canvas) {
@@ -195,55 +171,224 @@ class XpanDashboardView @JvmOverloads constructor(
         val levelRollDegrees = normalizeSigned(rawRollDegrees - deviceRotationDegrees)
         val isLevel = kotlin.math.abs(levelRollDegrees) < 1.2f &&
             kotlin.math.abs(pitchDegrees) < 1.2f
-        val accent = if (isLevel) Color.rgb(214, 255, 66) else Color.rgb(239, 187, 80)
+        val accent = if (isLevel) {
+            instrumentTheme.accent
+        } else {
+            Color.rgb(230, 157, 69)
+        }
+        val bezelRadius = radius + dp(15f)
 
         canvas.save()
         canvas.rotate(contentRotationDegrees, cx, cy)
-        fillPaint.color = Color.argb(180, 17, 20, 18)
-        canvas.drawCircle(cx, cy, radius + dp(13f), fillPaint)
-        linePaint.strokeWidth = dp(1f)
-        linePaint.color = Color.argb(65, 246, 247, 248)
-        canvas.drawCircle(cx, cy, radius, linePaint)
-        canvas.drawCircle(cx, cy, radius * 0.62f, linePaint)
 
-        for (angle in -90..90 step 15) {
+        fillPaint.color = Color.argb(38, 0, 0, 0)
+        canvas.drawCircle(cx + dp(4f), cy + dp(6f), bezelRadius + dp(4f), fillPaint)
+        fillPaint.color = Color.argb(42, 0, 0, 0)
+        canvas.drawCircle(cx + dp(2f), cy + dp(3f), bezelRadius + dp(2f), fillPaint)
+
+        fillPaint.shader = RadialGradient(
+            cx - bezelRadius * 0.28f,
+            cy - bezelRadius * 0.34f,
+            bezelRadius * 1.45f,
+            intArrayOf(
+                Color.rgb(119, 124, 119),
+                Color.rgb(50, 54, 51),
+                Color.rgb(17, 19, 18),
+                Color.rgb(5, 7, 6)
+            ),
+            floatArrayOf(0f, 0.36f, 0.76f, 1f),
+            Shader.TileMode.CLAMP
+        )
+        canvas.drawCircle(cx, cy, bezelRadius, fillPaint)
+        fillPaint.shader = null
+        linePaint.color = Color.argb(180, 203, 208, 201)
+        linePaint.strokeWidth = dp(0.9f)
+        canvas.drawCircle(cx, cy, bezelRadius - dp(1f), linePaint)
+        linePaint.color = Color.argb(100, 0, 0, 0)
+        linePaint.strokeWidth = dp(2f)
+        canvas.drawCircle(cx, cy, radius + dp(5f), linePaint)
+
+        fillPaint.shader = RadialGradient(
+            cx - radius * 0.22f,
+            cy - radius * 0.28f,
+            radius * 1.38f,
+            intArrayOf(
+                Color.rgb(40, 45, 41),
+                Color.rgb(17, 21, 18),
+                Color.rgb(7, 9, 8)
+            ),
+            floatArrayOf(0f, 0.58f, 1f),
+            Shader.TileMode.CLAMP
+        )
+        canvas.drawCircle(cx, cy, radius, fillPaint)
+        fillPaint.shader = null
+
+        val screwRadius = radius + dp(9.5f)
+        for (angle in intArrayOf(45, 135, 225, 315)) {
             val radians = Math.toRadians(angle.toDouble())
-            val inner = if (angle % 45 == 0) radius * 0.82f else radius * 0.9f
+            val screwX = cx + (kotlin.math.sin(radians) * screwRadius).toFloat()
+            val screwY = cy - (kotlin.math.cos(radians) * screwRadius).toFloat()
+            fillPaint.color = Color.rgb(12, 14, 13)
+            canvas.drawCircle(screwX, screwY, dp(2.3f), fillPaint)
+            linePaint.color = Color.argb(145, 205, 210, 203)
+            linePaint.strokeWidth = dp(0.65f)
+            canvas.drawLine(
+                screwX - dp(1.15f),
+                screwY + dp(0.5f),
+                screwX + dp(1.15f),
+                screwY - dp(0.5f),
+                linePaint
+            )
+        }
+
+        linePaint.strokeWidth = dp(0.8f)
+        linePaint.color = Color.argb(92, 238, 242, 237)
+        canvas.drawCircle(cx, cy, radius, linePaint)
+        canvas.drawCircle(cx, cy, radius * 0.68f, linePaint)
+
+        for (angle in -90..90 step 5) {
+            val radians = Math.toRadians(angle.toDouble())
+            val inner = when {
+                angle % 30 == 0 -> radius * 0.78f
+                angle % 15 == 0 -> radius * 0.84f
+                else -> radius * 0.91f
+            }
             val sx = cx + (kotlin.math.sin(radians) * inner).toFloat()
             val sy = cy - (kotlin.math.cos(radians) * inner).toFloat()
             val ex = cx + (kotlin.math.sin(radians) * radius).toFloat()
             val ey = cy - (kotlin.math.cos(radians) * radius).toFloat()
+            linePaint.color = if (angle % 15 == 0) {
+                Color.argb(165, 229, 234, 228)
+            } else {
+                Color.argb(75, 229, 234, 228)
+            }
+            linePaint.strokeWidth = if (angle % 30 == 0) dp(1.15f) else dp(0.7f)
             canvas.drawLine(sx, sy, ex, ey, linePaint)
+        }
+
+        textPaint.textAlign = Paint.Align.CENTER
+        textPaint.textSize = sp(6.2f)
+        textPaint.letterSpacing = 0.04f
+        textPaint.color = Color.argb(160, 236, 240, 235)
+        for (angle in intArrayOf(-60, -30, 0, 30, 60)) {
+            val radians = Math.toRadians(angle.toDouble())
+            val labelRadius = radius * 0.69f
+            val labelX = cx + (kotlin.math.sin(radians) * labelRadius).toFloat()
+            val labelY = cy - (kotlin.math.cos(radians) * labelRadius).toFloat() +
+                dp(2.1f)
+            canvas.drawText(
+                if (angle > 0) "+$angle" else angle.toString(),
+                labelX,
+                labelY,
+                textPaint
+            )
         }
 
         canvas.save()
         canvas.rotate(-levelRollDegrees.coerceIn(-35f, 35f), cx, cy)
+        val pitchOffset = (pitchDegrees.coerceIn(-12f, 12f) / 12f) * radius * 0.28f
+        linePaint.color = Color.argb(82, 229, 234, 228)
+        linePaint.strokeWidth = dp(0.75f)
+        for (pitchMark in -10..10 step 5) {
+            val ladderY = cy + pitchOffset - (pitchMark / 10f) * radius * 0.34f
+            val halfWidth = if (pitchMark == 0) radius * 0.52f else radius * 0.25f
+            canvas.drawLine(
+                cx - halfWidth,
+                ladderY,
+                cx - dp(7f),
+                ladderY,
+                linePaint
+            )
+            canvas.drawLine(
+                cx + dp(7f),
+                ladderY,
+                cx + halfWidth,
+                ladderY,
+                linePaint
+            )
+        }
         linePaint.color = accent
-        linePaint.strokeWidth = dp(2f)
-        canvas.drawLine(cx - radius * 0.82f, cy, cx - dp(12f), cy, linePaint)
-        canvas.drawLine(cx + dp(12f), cy, cx + radius * 0.82f, cy, linePaint)
+        linePaint.strokeWidth = dp(2.1f)
+        canvas.drawLine(
+            cx - radius * 0.74f,
+            cy + pitchOffset,
+            cx - dp(12f),
+            cy + pitchOffset,
+            linePaint
+        )
+        canvas.drawLine(
+            cx + dp(12f),
+            cy + pitchOffset,
+            cx + radius * 0.74f,
+            cy + pitchOffset,
+            linePaint
+        )
+        linePaint.strokeWidth = dp(1.3f)
+        canvas.drawLine(
+            cx,
+            cy + pitchOffset - dp(8f),
+            cx,
+            cy + pitchOffset + dp(8f),
+            linePaint
+        )
         canvas.restore()
 
         val bubbleX = cx + (levelRollDegrees.coerceIn(-12f, 12f) / 12f) * radius * 0.42f
         val bubbleY = cy + (pitchDegrees.coerceIn(-12f, 12f) / 12f) * radius * 0.42f
-        fillPaint.color = accent
-        canvas.drawCircle(bubbleX, bubbleY, dp(6.5f), fillPaint)
+        fillPaint.color = Color.argb(95, 0, 0, 0)
+        canvas.drawCircle(bubbleX + dp(1.3f), bubbleY + dp(1.8f), dp(8.2f), fillPaint)
+        linePaint.color = accent
+        linePaint.strokeWidth = dp(1.3f)
+        canvas.drawCircle(bubbleX, bubbleY, dp(8f), linePaint)
+        fillPaint.shader = RadialGradient(
+            bubbleX - dp(2.2f),
+            bubbleY - dp(2.6f),
+            dp(9f),
+            intArrayOf(
+                Color.argb(245, 246, 250, 235),
+                accent,
+                Color.argb(210, 39, 47, 34)
+            ),
+            floatArrayOf(0f, 0.42f, 1f),
+            Shader.TileMode.CLAMP
+        )
+        canvas.drawCircle(bubbleX, bubbleY, dp(6.4f), fillPaint)
+        fillPaint.shader = null
         fillPaint.color = Color.rgb(10, 12, 11)
-        canvas.drawCircle(bubbleX, bubbleY, dp(2f), fillPaint)
+        canvas.drawCircle(bubbleX, bubbleY, dp(1.7f), fillPaint)
+        fillPaint.color = Color.argb(175, 255, 255, 255)
+        canvas.drawCircle(bubbleX - dp(2f), bubbleY - dp(2.3f), dp(1.15f), fillPaint)
 
         textPaint.textAlign = Paint.Align.CENTER
-        textPaint.color = Color.argb(170, 246, 247, 248)
-        textPaint.textSize = sp(9f)
+        textPaint.color = Color.argb(205, 239, 243, 238)
+        textPaint.textSize = sp(8f)
+        textPaint.letterSpacing = 0.04f
+        val readout = RectF(
+            cx - radius * 0.56f,
+            cy + radius * 0.67f,
+            cx + radius * 0.56f,
+            cy + radius * 0.88f
+        )
+        fillPaint.color = Color.argb(210, 4, 7, 5)
+        canvas.drawRoundRect(readout, dp(2.5f), dp(2.5f), fillPaint)
+        linePaint.color = Color.argb(125, 199, 205, 198)
+        linePaint.strokeWidth = dp(0.75f)
+        canvas.drawRoundRect(readout, dp(2.5f), dp(2.5f), linePaint)
         canvas.drawText(
             String.format(Locale.US, "%+.1f°  /  %+.1f°", levelRollDegrees, pitchDegrees),
             cx,
-            cy + radius + dp(29f),
+            readout.centerY() + dp(3f),
             textPaint
         )
-        textPaint.color = Color.rgb(214, 255, 66)
-        textPaint.textSize = sp(8f)
-        textPaint.letterSpacing = 0.12f
-        canvas.drawText("LEVEL", cx, cy - radius - dp(21f), textPaint)
+
+        levelPath.reset()
+        levelPath.moveTo(cx, cy - radius - dp(4f))
+        levelPath.lineTo(cx - dp(5f), cy - radius + dp(5f))
+        levelPath.lineTo(cx + dp(5f), cy - radius + dp(5f))
+        levelPath.close()
+        fillPaint.color = accent
+        canvas.drawPath(levelPath, fillPaint)
+
         canvas.restore()
     }
 

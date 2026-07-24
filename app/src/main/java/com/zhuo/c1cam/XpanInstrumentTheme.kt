@@ -8,7 +8,8 @@ enum class XpanInstrumentTheme(
     val screenTop: Int,
     val screenMiddle: Int,
     val screenBottom: Int,
-    val ink: Int
+    val ink: Int,
+    val accent: Int
 ) {
     GREEN(
         storageValue = "green",
@@ -16,7 +17,8 @@ enum class XpanInstrumentTheme(
         screenTop = Color.rgb(187, 194, 142),
         screenMiddle = Color.rgb(157, 166, 114),
         screenBottom = Color.rgb(134, 144, 95),
-        ink = Color.rgb(35, 48, 31)
+        ink = Color.rgb(35, 48, 31),
+        accent = Color.rgb(214, 255, 66)
     ),
     AMBER(
         storageValue = "amber",
@@ -24,7 +26,8 @@ enum class XpanInstrumentTheme(
         screenTop = Color.rgb(222, 177, 103),
         screenMiddle = Color.rgb(190, 137, 69),
         screenBottom = Color.rgb(154, 101, 42),
-        ink = Color.rgb(64, 38, 20)
+        ink = Color.rgb(64, 38, 20),
+        accent = Color.rgb(255, 181, 77)
     );
 
     fun inkWithAlpha(alpha: Int): Int {
