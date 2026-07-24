@@ -39,6 +39,7 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var outputFormatValue: TextView
     private lateinit var jpegQualityValue: TextView
     private lateinit var chromaDenoiseValue: TextView
+    private lateinit var inactivityTimeoutValue: TextView
 
     private var selectionMode: SelectionMode? = null
     private var visibleChoices: List<Choice> = emptyList()
@@ -77,6 +78,7 @@ class SettingsActivity : AppCompatActivity() {
         outputFormatValue = findViewById(R.id.output_format_value)
         jpegQualityValue = findViewById(R.id.jpeg_quality_value)
         chromaDenoiseValue = findViewById(R.id.chroma_denoise_value)
+        inactivityTimeoutValue = findViewById(R.id.inactivity_timeout_value)
 
         findViewById<View>(R.id.settings_back).setOnClickListener {
             performButtonHaptic(it)
@@ -109,6 +111,9 @@ class SettingsActivity : AppCompatActivity() {
         }
         findViewById<View>(R.id.chroma_denoise_row).setOnClickListener {
             openSelectionPage(SelectionMode.CHROMA_DENOISE)
+        }
+        findViewById<View>(R.id.inactivity_timeout_row).setOnClickListener {
+            openSelectionPage(SelectionMode.INACTIVITY_TIMEOUT)
         }
         findViewById<View>(R.id.import_lut_row).setOnClickListener {
             importLutLauncher.launch(arrayOf("text/plain", "application/octet-stream"))
@@ -188,6 +193,7 @@ class SettingsActivity : AppCompatActivity() {
             SelectionMode.OUTPUT_FORMAT -> outputFormatChoices()
             SelectionMode.JPEG_QUALITY -> jpegQualityChoices()
             SelectionMode.CHROMA_DENOISE -> chromaDenoiseChoices()
+            SelectionMode.INACTIVITY_TIMEOUT -> inactivityTimeoutChoices()
         }
 
         selectionTitle.text = when (mode) {
@@ -199,6 +205,7 @@ class SettingsActivity : AppCompatActivity() {
             SelectionMode.OUTPUT_FORMAT -> "File format"
             SelectionMode.JPEG_QUALITY -> "JPEG quality"
             SelectionMode.CHROMA_DENOISE -> "Chroma noise reduction"
+            SelectionMode.INACTIVITY_TIMEOUT -> "Auto-exit timeout"
         }
         selectionHint.text = when (mode) {
             SelectionMode.TARGET_RATIO -> "Choose the corrected output shape."
@@ -209,6 +216,7 @@ class SettingsActivity : AppCompatActivity() {
             SelectionMode.OUTPUT_FORMAT -> "JPEG stores capture metadata. PNG preserves pixels losslessly."
             SelectionMode.JPEG_QUALITY -> "Higher quality produces larger JPEG files and takes longer to encode."
             SelectionMode.CHROMA_DENOISE -> "Auto selects strength from the ISO recorded for each capture."
+            SelectionMode.INACTIVITY_TIMEOUT -> "The display stays awake until this period passes without interaction."
         }
 
         selectionList.adapter = ArrayAdapter(
@@ -262,6 +270,13 @@ class SettingsActivity : AppCompatActivity() {
 
             SelectionMode.CHROMA_DENOISE -> {
                 appSettings.chromaDenoiseMode = choice.chromaDenoiseMode ?: return
+            }
+
+            SelectionMode.INACTIVITY_TIMEOUT -> {
+                appSettings.inactivityTimeoutMinutes = InactivityTimeout.sanitize(
+                    choice.intValue ?: return
+                )
+                AppInactivityController.updateTimeout(appSettings.inactivityTimeoutMinutes)
             }
 
             null -> return
@@ -440,6 +455,18 @@ class SettingsActivity : AppCompatActivity() {
         )
     }
 
+    private fun inactivityTimeoutChoices(): List<Choice> {
+        return InactivityTimeout.choicesMinutes.map { minutes ->
+            Choice(
+                label = "${InactivityTimeout.label(minutes)}${
+                    if (minutes == InactivityTimeout.DEFAULT_MINUTES) " · Default" else ""
+                }",
+                intValue = minutes,
+                selected = appSettings.inactivityTimeoutMinutes == minutes
+            )
+        }
+    }
+
     private fun updateSummaries() {
         targetRatioValue.text = targetRatioLabel(appSettings.targetAspectRatio)
         focalLengthValue.text = "${appSettings.focalLength} mm"
@@ -449,6 +476,9 @@ class SettingsActivity : AppCompatActivity() {
         outputFormatValue.text = appSettings.imageOutputFormat.name
         jpegQualityValue.text = appSettings.jpegQuality.toString()
         chromaDenoiseValue.text = appSettings.chromaDenoiseMode.displayName
+        inactivityTimeoutValue.text = InactivityTimeout.label(
+            appSettings.inactivityTimeoutMinutes
+        )
     }
 
     private fun targetRatioLabel(value: Float): String {
@@ -588,6 +618,24 @@ class SettingsActivity : AppCompatActivity() {
         view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
     }
 
+    override fun onResume() {
+        super.onResume()
+        AppInactivityController.onActivityResumed(
+            this,
+            appSettings.inactivityTimeoutMinutes
+        )
+    }
+
+    override fun onPause() {
+        AppInactivityController.onActivityPaused(this)
+        super.onPause()
+    }
+
+    override fun onUserInteraction() {
+        super.onUserInteraction()
+        AppInactivityController.onUserInteraction(this)
+    }
+
     private enum class SelectionMode {
         TARGET_RATIO,
         FOCAL_LENGTH,
@@ -596,7 +644,8 @@ class SettingsActivity : AppCompatActivity() {
         TONE_MAP,
         OUTPUT_FORMAT,
         JPEG_QUALITY,
-        CHROMA_DENOISE
+        CHROMA_DENOISE,
+        INACTIVITY_TIMEOUT
     }
 
     private data class Choice(

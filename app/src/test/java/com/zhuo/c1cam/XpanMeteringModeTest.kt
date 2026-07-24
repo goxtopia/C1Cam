@@ -67,4 +67,45 @@ class XpanMeteringModeTest {
         assertTrue(spot.right - spot.left < center.right - center.left)
         assertTrue(spot.bottom - spot.top < center.bottom - center.top)
     }
+
+    @Test
+    fun softwareMeteringUsesOnlyTheXpanFrame() {
+        val frame = XpanSoftwareMeteringModel.frameFor(640, 360)
+        assertEquals(0, frame.left)
+        assertEquals(640, frame.right)
+        assertTrue(frame.top > 0)
+        assertTrue(frame.bottom < 360)
+        assertEquals(XpanMode.ASPECT_RATIO, frame.width.toFloat() / frame.height, 0.02f)
+    }
+
+    @Test
+    fun averageWeightIsUniformAcrossTheFrame() {
+        assertEquals(1f, XpanSoftwareMeteringModel.sampleWeight(
+            XpanMeteringMode.AVERAGE, 0.05f, 0.05f
+        ))
+        assertEquals(1f, XpanSoftwareMeteringModel.sampleWeight(
+            XpanMeteringMode.AVERAGE, 0.5f, 0.5f
+        ))
+    }
+
+    @Test
+    fun centerWeightedModeFavorsTheCenter() {
+        val edgeWeight = XpanSoftwareMeteringModel.sampleWeight(
+            XpanMeteringMode.CENTER_WEIGHTED, 0.05f, 0.05f
+        )
+        val centerWeight = XpanSoftwareMeteringModel.sampleWeight(
+            XpanMeteringMode.CENTER_WEIGHTED, 0.5f, 0.5f
+        )
+        assertTrue(centerWeight > edgeWeight)
+    }
+
+    @Test
+    fun spotModeRejectsSamplesOutsideTheCenter() {
+        assertEquals(1f, XpanSoftwareMeteringModel.sampleWeight(
+            XpanMeteringMode.SPOT, 0.5f, 0.5f
+        ))
+        assertEquals(0f, XpanSoftwareMeteringModel.sampleWeight(
+            XpanMeteringMode.SPOT, 0.2f, 0.5f
+        ))
+    }
 }

@@ -47,9 +47,8 @@ class XpanDashboardView @JvmOverloads constructor(
     private var pitchDegrees = 0f
     private var deviceRotationDegrees = 0f
     private var contentRotationDegrees = 0f
+    private var displayRotation = Surface.ROTATION_0
     private var histogram = FloatArray(64)
-    private var iso: Int? = null
-    private var exposureTimeNs: Long? = null
 
     fun setActive(active: Boolean) {
         if (isActive == active) return
@@ -64,12 +63,11 @@ class XpanDashboardView @JvmOverloads constructor(
 
     fun updateTelemetry(telemetry: XpanTelemetry) {
         histogram = telemetry.histogram.copyOf()
-        iso = telemetry.iso
-        exposureTimeNs = telemetry.exposureTimeNs
         postInvalidateOnAnimation()
     }
 
     fun setOrientation(deviceRotation: Int, displayRotation: Int) {
+        this.displayRotation = displayRotation
         deviceRotationDegrees = when (deviceRotation) {
             Surface.ROTATION_90 -> 90f
             Surface.ROTATION_180 -> 180f
@@ -122,7 +120,6 @@ class XpanDashboardView @JvmOverloads constructor(
         drawHeader(canvas)
         drawLevel(canvas)
         drawHistogram(canvas)
-        drawExposureReadout(canvas)
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
@@ -170,9 +167,7 @@ class XpanDashboardView @JvmOverloads constructor(
     private fun drawHeader(canvas: Canvas) {
         val landscape = width > height
         val cx = if (landscape) width * 0.56f else width * 0.31f
-        val cy = if (landscape) height * 0.16f else height * 0.12f
-        canvas.save()
-        canvas.rotate(contentRotationDegrees, cx, cy)
+        val cy = if (landscape) height * 0.16f else dp(24f)
         textPaint.color = Color.rgb(214, 255, 66)
         textPaint.textSize = sp(10f)
         textPaint.letterSpacing = 0.14f
@@ -182,7 +177,6 @@ class XpanDashboardView @JvmOverloads constructor(
         textPaint.color = Color.argb(150, 246, 247, 248)
         textPaint.textSize = sp(8f)
         canvas.drawText("PANORAMIC FILM BACK", cx, cy + dp(17f), textPaint)
-        canvas.restore()
     }
 
     private fun drawLevel(canvas: Canvas) {
@@ -246,14 +240,21 @@ class XpanDashboardView @JvmOverloads constructor(
     }
 
     private fun drawHistogram(canvas: Canvas) {
-        val landscape = width > height
-        val rect = if (landscape) {
-            RectF(width * 0.70f, height * 0.20f, width - dp(18f), height - dp(18f))
-        } else {
-            RectF(width * 0.35f, height * 0.66f, width - dp(18f), height * 0.91f)
-        }
+        val layout = XpanInfoColumnLayoutModel.calculate(
+            containerWidth = width,
+            containerHeight = height,
+            density = resources.displayMetrics.density,
+            displayRotation = displayRotation
+        )
+        val column = layout.column
+        val rect = RectF(
+            column.left.toFloat(),
+            column.histogramTop.toFloat(),
+            column.right.toFloat(),
+            column.histogramBottom.toFloat()
+        )
         canvas.save()
-        canvas.rotate(contentRotationDegrees, rect.centerX(), rect.centerY())
+        applyFixedLandscapeTransform(canvas, layout.rotationDegrees)
         fillPaint.color = Color.argb(160, 16, 19, 17)
         canvas.drawRoundRect(rect, dp(12f), dp(12f), fillPaint)
         linePaint.color = Color.argb(52, 246, 247, 248)
@@ -290,59 +291,20 @@ class XpanDashboardView @JvmOverloads constructor(
         canvas.restore()
     }
 
-    private fun drawExposureReadout(canvas: Canvas) {
-        val landscape = width > height
-        val rect = if (landscape) {
-            RectF(width * 0.31f, height * 0.60f, width * 0.47f, height - dp(18f))
-        } else {
-            RectF(dp(18f), height * 0.72f, width * 0.31f, height * 0.94f)
-        }
-        canvas.save()
-        canvas.rotate(contentRotationDegrees, rect.centerX(), rect.centerY())
-        fillPaint.color = Color.argb(160, 16, 19, 17)
-        canvas.drawRoundRect(rect, dp(12f), dp(12f), fillPaint)
-        linePaint.color = Color.argb(52, 246, 247, 248)
-        linePaint.strokeWidth = dp(1f)
-        canvas.drawRoundRect(rect, dp(12f), dp(12f), linePaint)
-
-        val isoText = iso?.toString() ?: "—"
-        val shutterText = formatShutter(exposureTimeNs)
-        textPaint.textAlign = Paint.Align.LEFT
-        textPaint.letterSpacing = 0.08f
-        if (landscape) {
-            val secondColumn = rect.centerX() + dp(5f)
-            textPaint.color = Color.argb(150, 246, 247, 248)
-            textPaint.textSize = sp(7f)
-            canvas.drawText("ISO", rect.left + dp(10f), rect.top + dp(18f), textPaint)
-            canvas.drawText("SS", secondColumn, rect.top + dp(18f), textPaint)
-            textPaint.color = Color.rgb(246, 247, 248)
-            textPaint.letterSpacing = 0f
-            textPaint.textSize = sp(13f)
-            canvas.drawText(isoText, rect.left + dp(10f), rect.top + dp(40f), textPaint)
-            textPaint.textSize = sp(11f)
-            canvas.drawText(shutterText, secondColumn, rect.top + dp(40f), textPaint)
-        } else {
-            textPaint.color = Color.argb(150, 246, 247, 248)
-            textPaint.textSize = sp(8f)
-            canvas.drawText("ISO", rect.left + dp(13f), rect.top + dp(22f), textPaint)
-            canvas.drawText("SHUTTER", rect.left + dp(13f), rect.top + dp(63f), textPaint)
-            textPaint.color = Color.rgb(246, 247, 248)
-            textPaint.textSize = sp(20f)
-            textPaint.letterSpacing = 0f
-            canvas.drawText(isoText, rect.left + dp(13f), rect.top + dp(45f), textPaint)
-            textPaint.textSize = sp(15f)
-            canvas.drawText(shutterText, rect.left + dp(13f), rect.top + dp(84f), textPaint)
-        }
-        canvas.restore()
-    }
-
-    private fun formatShutter(valueNs: Long?): String {
-        if (valueNs == null || valueNs <= 0L) return "—"
-        val seconds = valueNs / 1_000_000_000.0
-        return if (seconds >= 0.8) {
-            String.format(Locale.US, "%.1f s", seconds)
-        } else {
-            "1/${(1.0 / seconds).toInt().coerceAtLeast(1)}"
+    private fun applyFixedLandscapeTransform(canvas: Canvas, rotationDegrees: Int) {
+        when (rotationDegrees) {
+            90 -> {
+                canvas.translate(width.toFloat(), 0f)
+                canvas.rotate(90f)
+            }
+            -90 -> {
+                canvas.translate(0f, height.toFloat())
+                canvas.rotate(-90f)
+            }
+            180, -180 -> {
+                canvas.translate(width.toFloat(), height.toFloat())
+                canvas.rotate(180f)
+            }
         }
     }
 

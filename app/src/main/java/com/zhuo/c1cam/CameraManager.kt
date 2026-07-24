@@ -42,6 +42,8 @@ import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.math.abs
+import kotlin.math.ln
 import kotlin.math.sqrt
 import kotlin.math.roundToInt
 
@@ -59,7 +61,8 @@ class CameraManager(
     private val savedImageRotationDegreesProvider: () -> Int,
     private val onPreviewSourceAspectRatioChanged: () -> Unit,
     private val onXpanTelemetryUpdated: (XpanTelemetry) -> Unit,
-    private val onAfLockStateChanged: () -> Unit
+    private val onAfLockStateChanged: () -> Unit,
+    private val onCaptureProcessingStatusChanged: (CaptureProcessingStatus) -> Unit
 ) {
 
     private var imageCapture: ImageCapture? = null
@@ -71,6 +74,11 @@ class CameraManager(
     private var pendingAfLockAfterFocus = false
     private var analysisFrameCounter: Long = 0L
     private var lastTelemetryDispatchElapsedMs = 0L
+    private var lastSoftwareMeteringUpdateElapsedMs = 0L
+    private var lastLoggedMeteringMode: XpanMeteringMode? = null
+    private var lastAppliedExposureCompensationIndex: Int? = null
+    @Volatile
+    private var xpanSoftwareMeteringCorrectionEv = 0f
     @Volatile
     private var latestPreviewSourceAspectRatio: Float = 3f / 4f
     @Volatile
@@ -85,9 +93,15 @@ class CameraManager(
     private val captureProcessingExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private val captureSaveExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private val captureInFlightLimiter = CaptureInFlightLimiter(MAX_CAPTURES_IN_FLIGHT)
+    private val captureProcessingTracker = CaptureProcessingTracker()
     private val captureSequence = AtomicLong(0L)
 
     fun startCamera() {
+        if (appSettings.isXpanMode) {
+            xpanSoftwareMeteringCorrectionEv = 0f
+            lastSoftwareMeteringUpdateElapsedMs = 0L
+        }
+        lastAppliedExposureCompensationIndex = null
         val cameraProviderFuture = ProcessCameraProvider.getInstance(activity)
 
         val cameraCaptureCallback = createAfStateCaptureCallback()
@@ -145,7 +159,9 @@ class CameraManager(
                 }
 
                 if (appSettings.isXpanMode) {
-                    latestHistogram = calculateLumaHistogram(imageProxy)
+                    val lumaAnalysis = analyzeXpanLuma(imageProxy)
+                    latestHistogram = lumaAnalysis.histogram
+                    updateXpanSoftwareMetering(lumaAnalysis.meteredLuma)
                     dispatchXpanTelemetry()
                     imageProxy.close()
                     return@setAnalyzer
@@ -231,6 +247,7 @@ class CameraManager(
             return
         }
         val captureId = captureSequence.incrementAndGet()
+        publishCaptureProcessingStatus(captureProcessingTracker.enqueue(captureId))
 
         val viewW = viewFinder.width
         val viewH = viewFinder.height
@@ -267,11 +284,20 @@ class CameraManager(
                 object : ImageCapture.OnImageCapturedCallback() {
                     override fun onError(exc: ImageCaptureException) {
                         captureInFlightLimiter.release()
+                        publishCaptureProcessingStatus(
+                            captureProcessingTracker.complete(captureId)
+                        )
                         Log.e("CameraManager", "Photo capture failed: ${exc.message}", exc)
                         showCaptureResult("Capture failed")
                     }
 
                     override fun onCaptureSuccess(image: ImageProxy) {
+                        publishCaptureProcessingStatus(
+                            captureProcessingTracker.update(
+                                captureId,
+                                CaptureProcessingStage.PROCESSING
+                            )
+                        )
                         Log.i(
                             CAPTURE_PERF_TAG,
                             "capture=$captureId stage=image_received " +
@@ -315,11 +341,20 @@ class CameraManager(
                             )
                         } catch (error: Exception) {
                             captureInFlightLimiter.release()
+                            publishCaptureProcessingStatus(
+                                captureProcessingTracker.complete(captureId)
+                            )
                             Log.e("CameraManager", "Photo processing failed", error)
                             showCaptureResult("Could not process photo")
                             return
                         }
 
+                        publishCaptureProcessingStatus(
+                            captureProcessingTracker.update(
+                                captureId,
+                                CaptureProcessingStage.SAVING
+                            )
+                        )
                         try {
                             captureSaveExecutor.execute {
                                 val saved = try {
@@ -329,6 +364,9 @@ class CameraManager(
                                     false
                                 } finally {
                                     captureInFlightLimiter.release()
+                                    publishCaptureProcessingStatus(
+                                        captureProcessingTracker.complete(captureId)
+                                    )
                                 }
                                 showCaptureResult(
                                     if (saved) "Saved to Gallery" else "Could not save photo"
@@ -337,6 +375,9 @@ class CameraManager(
                         } catch (error: RejectedExecutionException) {
                             processedCapture.recycle()
                             captureInFlightLimiter.release()
+                            publishCaptureProcessingStatus(
+                                captureProcessingTracker.complete(captureId)
+                            )
                             Log.w("CameraManager", "Photo save rejected during shutdown", error)
                         }
                     }
@@ -344,8 +385,15 @@ class CameraManager(
             )
         } catch (error: RuntimeException) {
             captureInFlightLimiter.release()
+            publishCaptureProcessingStatus(captureProcessingTracker.complete(captureId))
             Log.e("CameraManager", "Could not submit photo capture", error)
             showCaptureResult("Capture failed")
+        }
+    }
+
+    private fun publishCaptureProcessingStatus(status: CaptureProcessingStatus) {
+        activity.runOnUiThread {
+            onCaptureProcessingStatusChanged(status)
         }
     }
 
@@ -394,7 +442,9 @@ class CameraManager(
         val optionsBuilder = CaptureRequestOptions.Builder()
         val cameraInfo = Camera2CameraInfo.from(cam.cameraInfo)
 
-        if (appSettings.isSportsMode) {
+        // Scene modes are allowed to take ownership of the vendor 3A strategy.
+        // Keep them disabled in XPAN so its explicit metering pattern stays authoritative.
+        if (appSettings.isSportsMode && !appSettings.isXpanMode) {
             val availableSceneModes = cameraInfo.getCameraCharacteristic(CameraCharacteristics.CONTROL_AVAILABLE_SCENE_MODES) ?: IntArray(0)
 
             if (availableSceneModes.contains(CaptureRequest.CONTROL_SCENE_MODE_ACTION)) {
@@ -557,6 +607,15 @@ class CameraManager(
     }
 
     fun setExposureCompensation(evValue: Float) {
+        val meteringCorrection = if (appSettings.isXpanMode) {
+            xpanSoftwareMeteringCorrectionEv
+        } else {
+            0f
+        }
+        applyExposureCompensationEv(evValue + meteringCorrection)
+    }
+
+    private fun applyExposureCompensationEv(evValue: Float) {
         val cam = camera ?: return
         val exposureState = cam.cameraInfo.exposureState
         if (!exposureState.isExposureCompensationSupported) return
@@ -569,7 +628,9 @@ class CameraManager(
 
         val index = (evValue / stepVal).roundToInt()
         val clampedIndex = index.coerceIn(range.lower, range.upper)
+        if (lastAppliedExposureCompensationIndex == clampedIndex) return
 
+        lastAppliedExposureCompensationIndex = clampedIndex
         cam.cameraControl.setExposureCompensationIndex(clampedIndex)
     }
 
@@ -579,21 +640,15 @@ class CameraManager(
     }
 
     @OptIn(ExperimentalCamera2Interop::class)
-    fun setXpanMeteringMode(mode: XpanMeteringMode): Boolean {
+    fun setXpanMeteringMode(mode: XpanMeteringMode) {
         appSettings.xpanMeteringMode = mode
         // A new metering pattern needs a fresh AE convergence pass.
         appSettings.isAeLocked = false
+        xpanSoftwareMeteringCorrectionEv = 0f
+        lastSoftwareMeteringUpdateElapsedMs = 0L
+        lastLoggedMeteringMode = null
         applyCaptureRequestOptions()
-
-        val cam = camera ?: return false
-        val cameraInfo = Camera2CameraInfo.from(cam.cameraInfo)
-        val maxRegionCount = cameraInfo.getCameraCharacteristic(
-            CameraCharacteristics.CONTROL_MAX_REGIONS_AE
-        ) ?: 0
-        val activeArray = cameraInfo.getCameraCharacteristic(
-            CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE
-        )
-        return maxRegionCount > 0 && activeArray != null
+        applyExposureCompensationEv(appSettings.evVal)
     }
 
     fun setAfLocked(locked: Boolean) {
@@ -826,6 +881,7 @@ class CameraManager(
                 )
                 latestCaptureMetadata = metadata
                 dispatchXpanTelemetry()
+                logAppliedXpanMeteringRequest(request)
                 val captureIntent = request.get(CaptureRequest.CONTROL_CAPTURE_INTENT)
                 if (captureIntent == CaptureRequest.CONTROL_CAPTURE_INTENT_STILL_CAPTURE ||
                     captureIntent == CaptureRequest.CONTROL_CAPTURE_INTENT_ZERO_SHUTTER_LAG
@@ -877,34 +933,97 @@ class CameraManager(
         cam.cameraControl.setZoomRatio(desiredZoom.coerceIn(1f, maxZoom))
     }
 
-    private fun calculateLumaHistogram(image: ImageProxy): FloatArray {
+    private fun analyzeXpanLuma(image: ImageProxy): XpanLumaAnalysis {
         val bins = IntArray(64)
-        val plane = image.planes.firstOrNull() ?: return FloatArray(64)
+        val plane = image.planes.firstOrNull()
+            ?: return XpanLumaAnalysis(FloatArray(64), XPAN_METERING_TARGET_LUMA)
         val buffer = plane.buffer.duplicate()
         val rowStride = plane.rowStride
         val pixelStride = plane.pixelStride
         val sampleStep = 4
         var sampledPixels = 0
+        var weightedLumaSum = 0f
+        var meteringWeightSum = 0f
+        val meteringFrame = XpanSoftwareMeteringModel.frameFor(image.width, image.height)
 
-        var y = 0
-        while (y < image.height) {
-            var x = 0
-            while (x < image.width) {
+        var y = meteringFrame.top
+        while (y < meteringFrame.bottom) {
+            var x = meteringFrame.left
+            while (x < meteringFrame.right) {
                 val index = y * rowStride + x * pixelStride
                 if (index < buffer.limit()) {
                     val luminance = buffer.get(index).toInt() and 0xFF
                     bins[(luminance * bins.size / 256).coerceAtMost(bins.lastIndex)] += 1
                     sampledPixels += 1
+                    val normalizedX = (x - meteringFrame.left + 0.5f) / meteringFrame.width
+                    val normalizedY = (y - meteringFrame.top + 0.5f) / meteringFrame.height
+                    val weight = XpanSoftwareMeteringModel.sampleWeight(
+                        appSettings.xpanMeteringMode,
+                        normalizedX,
+                        normalizedY
+                    )
+                    if (weight > 0f) {
+                        weightedLumaSum +=
+                            XpanSoftwareMeteringModel.normalizeVideoLuma(luminance) * weight
+                        meteringWeightSum += weight
+                    }
                 }
                 x += sampleStep
             }
             y += sampleStep
         }
-        if (sampledPixels == 0) return FloatArray(bins.size)
+        if (sampledPixels == 0) {
+            return XpanLumaAnalysis(FloatArray(bins.size), XPAN_METERING_TARGET_LUMA)
+        }
         val peak = bins.maxOrNull()?.coerceAtLeast(1) ?: 1
-        return FloatArray(bins.size) { index ->
+        val histogram = FloatArray(bins.size) { index ->
             sqrt(bins[index].toFloat() / peak.toFloat())
         }
+        val meteredLuma = if (meteringWeightSum > 0f) {
+            weightedLumaSum / meteringWeightSum
+        } else {
+            XPAN_METERING_TARGET_LUMA
+        }
+        return XpanLumaAnalysis(histogram, meteredLuma)
+    }
+
+    private fun updateXpanSoftwareMetering(meteredLuma: Float) {
+        if (!appSettings.isXpanMode || appSettings.isAeLocked) return
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastSoftwareMeteringUpdateElapsedMs < SOFTWARE_METERING_INTERVAL_MS) return
+        lastSoftwareMeteringUpdateElapsedMs = now
+
+        val safeLuma = meteredLuma.coerceIn(0.03f, 0.97f)
+        val errorEv = (
+            ln(XPAN_METERING_TARGET_LUMA / safeLuma) / LN_2
+            ).coerceIn(-SOFTWARE_METERING_MAX_STEP_EV, SOFTWARE_METERING_MAX_STEP_EV)
+        if (abs(errorEv) < SOFTWARE_METERING_DEAD_BAND_EV) return
+
+        val previousCorrection = xpanSoftwareMeteringCorrectionEv
+        val updatedCorrection = (
+            previousCorrection + errorEv * SOFTWARE_METERING_RESPONSE
+            ).coerceIn(-SOFTWARE_METERING_MAX_CORRECTION_EV, SOFTWARE_METERING_MAX_CORRECTION_EV)
+        if (abs(updatedCorrection - previousCorrection) < SOFTWARE_METERING_MIN_UPDATE_EV) return
+
+        xpanSoftwareMeteringCorrectionEv = updatedCorrection
+        applyExposureCompensationEv(appSettings.evVal + updatedCorrection)
+    }
+
+    private fun logAppliedXpanMeteringRequest(request: CaptureRequest) {
+        if (!appSettings.isXpanMode ||
+            lastLoggedMeteringMode == appSettings.xpanMeteringMode
+        ) {
+            return
+        }
+        lastLoggedMeteringMode = appSettings.xpanMeteringMode
+        val regions = request.get(CaptureRequest.CONTROL_AE_REGIONS)
+        val sceneMode = request.get(CaptureRequest.CONTROL_SCENE_MODE)
+        Log.i(
+            "CameraManager",
+            "XPAN metering=${appSettings.xpanMeteringMode.storageValue}, " +
+                "submittedRegions=${regions?.contentToString() ?: "none"}, " +
+                "sceneMode=$sceneMode"
+        )
     }
 
     private fun dispatchXpanTelemetry() {
@@ -960,5 +1079,18 @@ class CameraManager(
         private const val MAX_CAPTURES_IN_FLIGHT = 2
         private const val EXECUTOR_SHUTDOWN_TIMEOUT_SECONDS = 5L
         private const val TELEMETRY_INTERVAL_MS = 120L
+        private const val SOFTWARE_METERING_INTERVAL_MS = 280L
+        private const val XPAN_METERING_TARGET_LUMA = 0.42f
+        private const val SOFTWARE_METERING_RESPONSE = 0.32f
+        private const val SOFTWARE_METERING_MAX_STEP_EV = 0.75f
+        private const val SOFTWARE_METERING_MAX_CORRECTION_EV = 2f
+        private const val SOFTWARE_METERING_DEAD_BAND_EV = 0.08f
+        private const val SOFTWARE_METERING_MIN_UPDATE_EV = 0.04f
+        private const val LN_2 = 0.6931472f
     }
 }
+
+private data class XpanLumaAnalysis(
+    val histogram: FloatArray,
+    val meteredLuma: Float
+)

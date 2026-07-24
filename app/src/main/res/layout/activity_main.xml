@@ -154,6 +154,8 @@
         android:layout_width="0dp"
         android:layout_height="0dp"
         android:background="@color/black"
+        android:clipChildren="false"
+        android:clipToPadding="false"
         app:layout_constraintBottom_toTopOf="@id/bottom_controls"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
@@ -231,6 +233,13 @@
             android:text="LIVE VIEW"
             android:textColor="@color/cam_text_primary"
             android:textSize="9sp" />
+
+        <com.zhuo.c1cam.XpanProcessingPanelView
+            android:id="@+id/xpan_processing_panel"
+            android:layout_width="218dp"
+            android:layout_height="112dp"
+            android:layout_gravity="top|start"
+            android:visibility="gone" />
     </FrameLayout>
 
     <androidx.constraintlayout.widget.ConstraintLayout
@@ -549,7 +558,8 @@
                     <com.zhuo.c1cam.InstrumentScaleView
                         android:layout_width="match_parent"
                         android:layout_height="match_parent"
-                        app:scaleDivisions="13" />
+                        app:scaleDivisions="13"
+                        app:scaleFocalDetents="true" />
 
                     <com.google.android.material.slider.Slider
                         android:id="@+id/xpan_focal_slider"

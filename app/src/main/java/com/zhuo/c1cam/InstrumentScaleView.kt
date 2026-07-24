@@ -18,6 +18,7 @@ class InstrumentScaleView @JvmOverloads constructor(
 
     private val divisions: Int
     private val centerAccent: Boolean
+    private val focalDetents: Boolean
     private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
     }
@@ -33,6 +34,10 @@ class InstrumentScaleView @JvmOverloads constructor(
             .coerceAtLeast(2)
         centerAccent = values.getBoolean(
             R.styleable.InstrumentScaleView_scaleCenterAccent,
+            false
+        )
+        focalDetents = values.getBoolean(
+            R.styleable.InstrumentScaleView_scaleFocalDetents,
             false
         )
         values.recycle()
@@ -95,6 +100,17 @@ class InstrumentScaleView @JvmOverloads constructor(
             }
             linePaint.strokeWidth = if (isMajor) dp(0.9f) else dp(0.65f)
             canvas.drawLine(x, cy - tickHeight / 2f, x, cy + tickHeight / 2f, linePaint)
+        }
+
+        if (focalDetents) {
+            FocalLengthDetents.normalizedPositions().forEach { fraction ->
+                val x = usableLeft + (usableRight - usableLeft) * fraction
+                linePaint.color = Color.argb(225, 224, 226, 214)
+                linePaint.strokeWidth = dp(1.25f)
+                canvas.drawLine(x, cy - dp(6f), x, cy + dp(6f), linePaint)
+                fillPaint.color = Color.argb(225, 224, 226, 214)
+                canvas.drawCircle(x, cy - dp(7.2f), dp(1.25f), fillPaint)
+            }
         }
 
         linePaint.color = Color.argb(74, 255, 255, 255)

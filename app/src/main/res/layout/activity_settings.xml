@@ -124,6 +124,47 @@
 
                 <TextView
                     style="@style/C1_SettingsSectionLabel"
+                    android:text="POWER" />
+
+                <com.google.android.material.card.MaterialCardView
+                    style="@style/C1_SettingsCard">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical">
+
+                        <LinearLayout
+                            android:id="@+id/inactivity_timeout_row"
+                            style="@style/C1_SettingsRow">
+
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:orientation="vertical">
+
+                                <TextView
+                                    style="@style/C1_SettingsTitle"
+                                    android:text="Auto-exit timeout" />
+
+                                <TextView
+                                    style="@style/C1_SettingsSubtitle"
+                                    android:text="Keep screen awake until inactive" />
+                            </LinearLayout>
+
+                            <TextView
+                                android:id="@+id/inactivity_timeout_value"
+                                style="@style/C1_SettingsValue"
+                                tools:text="5 minutes" />
+
+                            <ImageView style="@style/C1_SettingsChevron" />
+                        </LinearLayout>
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <TextView
+                    style="@style/C1_SettingsSectionLabel"
                     android:text="FRAMING &amp; LENS" />
 
                 <com.google.android.material.card.MaterialCardView

@@ -47,6 +47,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var cameraContainer: View
     private lateinit var liveViewLabel: View
     private lateinit var xpanDashboard: XpanDashboardView
+    private lateinit var xpanProcessingPanel: XpanProcessingPanelView
     private lateinit var xpanBottomControls: View
     private lateinit var xpanViewfinderLabel: TextView
     private lateinit var xpanViewfinderOverlay: View
@@ -136,6 +137,7 @@ class MainActivity : AppCompatActivity() {
         mainViewContainer = findViewById(R.id.main_view_container)
         liveViewLabel = findViewById(R.id.live_view_label)
         xpanDashboard = findViewById(R.id.xpan_dashboard)
+        xpanProcessingPanel = findViewById(R.id.xpan_processing_panel)
         xpanBottomControls = findViewById(R.id.xpan_bottom_controls)
         xpanViewfinderLabel = findViewById(R.id.xpan_viewfinder_label)
         xpanViewfinderOverlay = findViewById(R.id.xpan_viewfinder_overlay)
@@ -182,9 +184,13 @@ class MainActivity : AppCompatActivity() {
             onPreviewSourceAspectRatioChanged = { updateCropFrameGuideUi() },
             onXpanTelemetryUpdated = { telemetry ->
                 xpanDashboard.updateTelemetry(telemetry)
+                xpanProcessingPanel.updateTelemetry(telemetry)
             },
             onAfLockStateChanged = {
                 updateLockButtonsUi()
+            },
+            onCaptureProcessingStatusChanged = { status ->
+                xpanProcessingPanel.updateStatus(status)
             }
         )
         deviceOrientationManager = DeviceOrientationManager(this) { rotation ->
@@ -280,17 +286,13 @@ class MainActivity : AppCompatActivity() {
         xpanMeteringButton.setOnClickListener {
             performCrispButtonHaptic(it)
             val mode = appSettings.xpanMeteringMode.next()
-            val isCustomMeteringSupported = cameraManager.setXpanMeteringMode(mode)
+            cameraManager.setXpanMeteringMode(mode)
             updateXpanMeteringButtonUi()
             updateLockButtonsUi()
             appSettings.save(overlay.getNormalizedPoints())
             Toast.makeText(
                 this,
-                if (isCustomMeteringSupported) {
-                    mode.displayName
-                } else {
-                    "${mode.displayName} · device fallback"
-                },
+                mode.displayName,
                 Toast.LENGTH_SHORT
             ).show()
         }
@@ -315,9 +317,13 @@ class MainActivity : AppCompatActivity() {
             if (fromUser) {
                 val step = value.roundToInt()
                 if (lastFocalHapticStep != step) {
-                    xpanFocalSlider.performHapticFeedback(
-                        android.view.HapticFeedbackConstants.CLOCK_TICK
-                    )
+                    if (FocalLengthDetents.isClassicDetent(step)) {
+                        performFocalDetentHaptic()
+                    } else {
+                        xpanFocalSlider.performHapticFeedback(
+                            android.view.HapticFeedbackConstants.CLOCK_TICK
+                        )
+                    }
                     lastFocalHapticStep = step
                 }
                 appSettings.focalLength = value.toInt()
@@ -613,6 +619,7 @@ class MainActivity : AppCompatActivity() {
         xpanModeBadge.visibility = if (enabled) View.VISIBLE else View.GONE
         xpanViewfinderLabel.visibility = if (enabled) View.VISIBLE else View.GONE
         xpanViewfinderOverlay.visibility = if (enabled) View.VISIBLE else View.GONE
+        xpanProcessingPanel.visibility = if (enabled) View.VISIBLE else View.GONE
         liveViewLabel.visibility = if (enabled) View.GONE else View.VISIBLE
         overlay.isEnabled = !enabled
         overlay.isOverlayVisible = !enabled && !appSettings.isCropModeOff
@@ -663,6 +670,8 @@ class MainActivity : AppCompatActivity() {
                     0
                 )
                 xpanViewfinderLabel.layoutParams = labelParams
+
+                layoutXpanProcessingPanel()
             } else {
                 params.width = android.widget.FrameLayout.LayoutParams.MATCH_PARENT
                 params.height = android.widget.FrameLayout.LayoutParams.MATCH_PARENT
@@ -708,6 +717,30 @@ class MainActivity : AppCompatActivity() {
 
     private fun performCrispButtonHaptic(view: View) {
         view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+    }
+
+    private fun performFocalDetentHaptic() {
+        val feedbackConstant = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            android.view.HapticFeedbackConstants.CONFIRM
+        } else {
+            android.view.HapticFeedbackConstants.LONG_PRESS
+        }
+        xpanFocalSlider.performHapticFeedback(feedbackConstant)
+        xpanFocalValue.animate().cancel()
+        xpanFocalValue.scaleX = 1f
+        xpanFocalValue.scaleY = 1f
+        xpanFocalValue.animate()
+            .scaleX(1.07f)
+            .scaleY(1.07f)
+            .setDuration(75L)
+            .withEndAction {
+                xpanFocalValue.animate()
+                    .scaleX(1f)
+                    .scaleY(1f)
+                    .setDuration(90L)
+                    .start()
+            }
+            .start()
     }
 
     private fun loadLutFromStorageKey(storageKey: String): Lut3D? {
@@ -776,9 +809,27 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        super.onDestroy()
         appSettings.save(overlay.getNormalizedPoints())
         cameraManager.shutdown()
+        super.onDestroy()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        AppInactivityController.onActivityResumed(
+            this,
+            appSettings.inactivityTimeoutMinutes
+        )
+    }
+
+    override fun onPause() {
+        AppInactivityController.onActivityPaused(this)
+        super.onPause()
+    }
+
+    override fun onUserInteraction() {
+        super.onUserInteraction()
+        AppInactivityController.onUserInteraction(this)
     }
 
     override fun onStart() {
@@ -810,6 +861,35 @@ class MainActivity : AppCompatActivity() {
     private fun updateOrientationDependentUi(deviceRotation: Int) {
         val displayRotation = viewFinder.display?.rotation ?: Surface.ROTATION_0
         xpanDashboard.setOrientation(deviceRotation, displayRotation)
+        if (appSettings.isXpanMode) {
+            mainViewContainer.post { layoutXpanProcessingPanel() }
+        }
+    }
+
+    private fun layoutXpanProcessingPanel() {
+        if (mainViewContainer.width <= 0 || mainViewContainer.height <= 0) return
+        val displayRotation = viewFinder.display?.rotation ?: Surface.ROTATION_0
+        val infoLayout = XpanInfoColumnLayoutModel.calculate(
+            containerWidth = mainViewContainer.width,
+            containerHeight = mainViewContainer.height,
+            density = resources.displayMetrics.density,
+            displayRotation = displayRotation
+        )
+        val column = infoLayout.column
+        val processingPanelParams = xpanProcessingPanel.layoutParams as
+            android.widget.FrameLayout.LayoutParams
+        processingPanelParams.width = column.right - column.left
+        processingPanelParams.height = column.lcdBottom - column.lcdTop
+        processingPanelParams.gravity = Gravity.TOP or Gravity.START
+        processingPanelParams.setMargins(
+            infoLayout.lcdViewLeft,
+            infoLayout.lcdViewTop,
+            0,
+            0
+        )
+        xpanProcessingPanel.animate().cancel()
+        xpanProcessingPanel.rotation = infoLayout.rotationDegrees.toFloat()
+        xpanProcessingPanel.layoutParams = processingPanelParams
     }
 
     private fun toggleFullscreen() {
