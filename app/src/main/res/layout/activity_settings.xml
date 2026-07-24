@@ -6,7 +6,7 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@drawable/bg_settings_page"
-    tools:context=".SettingsActivity">
+    tools:context=".ui.SettingsActivity">
 
     <LinearLayout
         android:id="@+id/settings_main_page"

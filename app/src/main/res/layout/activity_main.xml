@@ -5,14 +5,14 @@
     android:id="@+id/main"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/cam_bg_end"
-    tools:context=".MainActivity">
+    android:background="@drawable/bg_metal_surface"
+    tools:context=".ui.MainActivity">
 
     <androidx.constraintlayout.widget.ConstraintLayout
         android:id="@+id/top_controls"
         android:layout_width="0dp"
         android:layout_height="72dp"
-        android:background="@color/cam_chrome"
+        android:background="@drawable/bg_metal_surface"
         android:paddingStart="20dp"
         android:paddingEnd="12dp"
         app:layout_constraintEnd_toEndOf="parent"
