@@ -19,17 +19,27 @@ class XpanInfoColumnLayoutModelTest {
         assertEquals(90, layout.rotationDegrees)
         assertEquals(1695, layout.logicalWidth)
         assertEquals(1080, layout.logicalHeight)
-        assertTrue(layout.column.histogramBottom < layout.column.lcdTop)
-        val columnWidth = layout.column.right - layout.column.left
-        val lcdHeight = layout.column.lcdBottom - layout.column.lcdTop
+        assertEquals(745, layout.column.left)
+        assertEquals(1641, layout.column.right)
+        assertTrue(layout.column.levelBottom < layout.column.histogramTop)
+        assertEquals(layout.column.histogramTop, layout.column.lcdTop)
+        assertEquals(layout.column.histogramBottom, layout.column.lcdBottom)
+        assertTrue(layout.column.histogramRight < layout.column.lcdLeft)
+        assertEquals(18, layout.column.lcdLeft - layout.column.histogramRight)
+        assertEquals(18, layout.column.histogramTop - layout.column.levelBottom)
+        assertEquals(layout.column.lcdLeft, layout.column.levelLeft)
+        assertEquals(layout.column.lcdRight, layout.column.levelRight)
+        val histogramWidth =
+            layout.column.histogramRight - layout.column.histogramLeft
         val histogramHeight =
             layout.column.histogramBottom - layout.column.histogramTop
-        assertEquals(218f / 112f, columnWidth.toFloat() / lcdHeight, 0.02f)
-        assertEquals(2.8f, columnWidth.toFloat() / histogramHeight, 0.03f)
-        assertTrue(
-            columnWidth >
-                lcdHeight
-        )
+        val lcdHeight =
+            layout.column.lcdBottom - layout.column.lcdTop
+        assertEquals(1f, histogramWidth.toFloat() / histogramHeight, 0.02f)
+        assertEquals(histogramHeight, lcdHeight)
+        assertTrue(layout.column.levelRight > layout.column.levelLeft)
+        assertTrue(layout.column.right - layout.column.left >
+            lcdHeight)
     }
 
     @Test
@@ -42,16 +52,20 @@ class XpanInfoColumnLayoutModelTest {
         )
 
         assertEquals(0, layout.rotationDegrees)
-        assertEquals(1506, layout.column.left)
+        assertEquals(1056, layout.column.left)
         assertEquals(2346, layout.column.right)
         assertTrue(layout.column.histogramTop < layout.column.histogramBottom)
-        assertTrue(layout.column.histogramBottom < layout.column.lcdTop)
+        assertTrue(layout.column.levelBottom < layout.column.histogramTop)
         assertEquals(
-            218f / 112f,
-            (layout.column.right - layout.column.left).toFloat() /
-                (layout.column.lcdBottom - layout.column.lcdTop),
-            0.02f
+            layout.column.histogramBottom - layout.column.histogramTop,
+            layout.column.histogramRight - layout.column.histogramLeft
         )
+        assertEquals(
+            layout.column.histogramBottom - layout.column.histogramTop,
+            layout.column.lcdBottom - layout.column.lcdTop
+        )
+        assertTrue(layout.column.levelRight - layout.column.levelLeft >
+            layout.column.histogramRight - layout.column.histogramLeft)
     }
 
     @Test
@@ -64,5 +78,33 @@ class XpanInfoColumnLayoutModelTest {
         )
 
         assertEquals(-180, layout.rotationDegrees)
+    }
+
+    @Test
+    fun schemeTwoPlacesAllInstrumentsInOneRightAlignedRail() {
+        val layout = XpanInfoColumnLayoutModel.calculate(
+            containerWidth = 1080,
+            containerHeight = 1695,
+            density = 3f,
+            displayRotation = Surface.ROTATION_0,
+            uiLayout = XpanUiLayout.SCHEME_2
+        )
+        val column = layout.column
+
+        assertEquals(column.histogramTop, column.levelTop)
+        assertEquals(column.histogramTop, column.lcdTop)
+        assertEquals(column.histogramBottom, column.levelBottom)
+        assertEquals(column.histogramBottom, column.lcdBottom)
+        assertTrue(column.left >= (layout.logicalWidth * 0.28f).toInt())
+        assertEquals(layout.logicalWidth - 54, column.right)
+        assertEquals(column.right, column.lcdRight)
+        assertTrue(column.histogramRight < column.levelLeft)
+        assertTrue(column.levelRight < column.lcdLeft)
+        assertEquals(
+            column.histogramBottom - column.histogramTop,
+            column.histogramRight - column.histogramLeft
+        )
+        assertTrue(column.lcdRight - column.lcdLeft >
+            column.lcdBottom - column.lcdTop)
     }
 }

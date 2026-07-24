@@ -134,9 +134,13 @@ class XpanProcessingPanelView @JvmOverloads constructor(
         linePaint.strokeWidth = 1.2f * unit
         canvas.drawRoundRect(lcd, 2.5f * unit, 2.5f * unit, linePaint)
 
-        drawExposureReadout(canvas, lcd, unit)
-        drawQueueReadout(canvas, lcd, unit)
-        drawStageGauge(canvas, lcd, unit)
+        if (lcd.width() / lcd.height() >= WIDE_LAYOUT_ASPECT_RATIO) {
+            drawWideDashboard(canvas, lcd, unit)
+        } else {
+            drawExposureReadout(canvas, lcd, unit)
+            drawQueueReadout(canvas, lcd, unit)
+            drawStageGauge(canvas, lcd, unit)
+        }
     }
 
     private fun drawEnclosure(canvas: Canvas, unit: Float) {
@@ -348,6 +352,233 @@ class XpanProcessingPanelView @JvmOverloads constructor(
         linePaint.strokeCap = Paint.Cap.SQUARE
     }
 
+    private fun drawWideDashboard(canvas: Canvas, lcd: RectF, unit: Float) {
+        val padding = 7f * unit
+        val content = RectF(
+            lcd.left + padding,
+            lcd.top + padding,
+            lcd.right - padding,
+            lcd.bottom - padding
+        )
+        val isoRight = content.left + content.width() * 0.22f
+        val shutterRight = content.left + content.width() * 0.47f
+        val bufferRight = content.left + content.width() * 0.69f
+
+        linePaint.color = instrumentTheme.inkWithAlpha(88)
+        linePaint.strokeWidth = 0.65f * unit
+        for (x in floatArrayOf(isoRight, shutterRight, bufferRight)) {
+            canvas.drawLine(
+                x,
+                content.top + 1.5f * unit,
+                x,
+                content.bottom - 1.5f * unit,
+                linePaint
+            )
+        }
+
+        drawWideValueCell(
+            canvas = canvas,
+            label = "ISO",
+            value = iso?.toString() ?: "—",
+            left = content.left,
+            right = isoRight,
+            top = content.top,
+            unit = unit
+        )
+        drawWideValueCell(
+            canvas = canvas,
+            label = "SS",
+            value = formatShutter(exposureTimeNs),
+            left = isoRight,
+            right = shutterRight,
+            top = content.top,
+            unit = unit
+        )
+        drawWideBufferCell(
+            canvas = canvas,
+            left = shutterRight,
+            right = bufferRight,
+            top = content.top,
+            bottom = content.bottom,
+            unit = unit
+        )
+        drawWideStageCell(
+            canvas = canvas,
+            left = bufferRight,
+            right = content.right,
+            top = content.top,
+            bottom = content.bottom,
+            unit = unit
+        )
+    }
+
+    private fun drawWideValueCell(
+        canvas: Canvas,
+        label: String,
+        value: String,
+        left: Float,
+        right: Float,
+        top: Float,
+        unit: Float
+    ) {
+        textPaint.textAlign = Paint.Align.LEFT
+        textPaint.color = instrumentTheme.ink
+        textPaint.letterSpacing = 0.14f
+        textPaint.textSize = 6.2f * unit
+        canvas.drawText(label, left + 5f * unit, top + 8f * unit, textPaint)
+
+        textPaint.letterSpacing = 0f
+        textPaint.textSize = 15f * unit
+        canvas.drawText(value, left + 5f * unit, top + 27f * unit, textPaint)
+
+        linePaint.color = instrumentTheme.inkWithAlpha(72)
+        linePaint.strokeWidth = 0.65f * unit
+        canvas.drawLine(
+            left + 5f * unit,
+            top + 33f * unit,
+            right - 5f * unit,
+            top + 33f * unit,
+            linePaint
+        )
+
+        textPaint.color = instrumentTheme.inkWithAlpha(150)
+        textPaint.textSize = 4.8f * unit
+        textPaint.letterSpacing = 0.08f
+        canvas.drawText(
+            if (label == "ISO") "SENSITIVITY" else "EXPOSURE",
+            left + 5f * unit,
+            top + 43f * unit,
+            textPaint
+        )
+    }
+
+    private fun drawWideBufferCell(
+        canvas: Canvas,
+        left: Float,
+        right: Float,
+        top: Float,
+        bottom: Float,
+        unit: Float
+    ) {
+        textPaint.textAlign = Paint.Align.LEFT
+        textPaint.color = instrumentTheme.ink
+        textPaint.textSize = 5.8f * unit
+        textPaint.letterSpacing = 0.13f
+        canvas.drawText("BUFFER", left + 5f * unit, top + 8f * unit, textPaint)
+
+        val digitHeight = minOf(20f * unit, (bottom - top) * 0.42f)
+        val digitWidth = digitHeight * 0.55f
+        val digitGap = 2.5f * unit
+        val digitsRight = right - 6f * unit
+        val digitTop = top + 13f * unit
+        val ghostInk = instrumentTheme.inkWithAlpha(35)
+        val count = status.pendingCount.coerceIn(0, 99)
+        drawSevenSegmentDigit(
+            canvas,
+            8,
+            digitsRight - digitWidth * 2f - digitGap,
+            digitTop,
+            digitWidth,
+            digitHeight,
+            ghostInk
+        )
+        drawSevenSegmentDigit(
+            canvas,
+            8,
+            digitsRight - digitWidth,
+            digitTop,
+            digitWidth,
+            digitHeight,
+            ghostInk
+        )
+        drawSevenSegmentDigit(
+            canvas,
+            count / 10,
+            digitsRight - digitWidth * 2f - digitGap,
+            digitTop,
+            digitWidth,
+            digitHeight,
+            instrumentTheme.ink
+        )
+        drawSevenSegmentDigit(
+            canvas,
+            count % 10,
+            digitsRight - digitWidth,
+            digitTop,
+            digitWidth,
+            digitHeight,
+            instrumentTheme.ink
+        )
+
+        textPaint.textAlign = Paint.Align.LEFT
+        textPaint.color = instrumentTheme.inkWithAlpha(165)
+        textPaint.textSize = 4.8f * unit
+        textPaint.letterSpacing = 0.08f
+        canvas.drawText(
+            if (status.pendingCount == 0) "READY" else "PENDING",
+            left + 5f * unit,
+            bottom - 4f * unit,
+            textPaint
+        )
+    }
+
+    private fun drawWideStageCell(
+        canvas: Canvas,
+        left: Float,
+        right: Float,
+        top: Float,
+        bottom: Float,
+        unit: Float
+    ) {
+        val stageText = when (status.foregroundStage) {
+            CaptureProcessingStage.EXPOSING -> "EXPOSING"
+            CaptureProcessingStage.PROCESSING -> "PROCESSING"
+            CaptureProcessingStage.SAVING -> "SAVING"
+            null -> "STANDBY"
+        }
+        textPaint.textAlign = Paint.Align.CENTER
+        textPaint.color = instrumentTheme.ink
+        textPaint.textSize = 5.8f * unit
+        textPaint.letterSpacing = 0.1f
+        canvas.drawText(stageText, (left + right) / 2f, top + 8f * unit, textPaint)
+
+        val gaugeLeft = left + 9f * unit
+        val gaugeRight = right - 9f * unit
+        val gaugeY = top + (bottom - top) * 0.57f
+        linePaint.color = instrumentTheme.inkWithAlpha(170)
+        linePaint.strokeWidth = 0.8f * unit
+        canvas.drawLine(gaugeLeft, gaugeY, gaugeRight, gaugeY, linePaint)
+        for (index in 0..2) {
+            val x = gaugeLeft + (gaugeRight - gaugeLeft) * index / 2f
+            canvas.drawLine(
+                x,
+                gaugeY - 3f * unit,
+                x,
+                gaugeY + 2f * unit,
+                linePaint
+            )
+        }
+
+        val targetX = gaugeLeft +
+            (gaugeRight - gaugeLeft) * needlePosition.coerceIn(0f, 1f)
+        val pivotX = (gaugeLeft + gaugeRight) / 2f
+        val pivotY = gaugeY - 1.5f * unit
+        linePaint.color = instrumentTheme.ink
+        linePaint.strokeWidth = 1.35f * unit
+        linePaint.strokeCap = Paint.Cap.ROUND
+        canvas.drawLine(pivotX, pivotY, targetX, gaugeY - 9f * unit, linePaint)
+        fillPaint.color = instrumentTheme.ink
+        canvas.drawCircle(pivotX, pivotY, 1.8f * unit, fillPaint)
+        linePaint.strokeCap = Paint.Cap.SQUARE
+
+        textPaint.color = instrumentTheme.inkWithAlpha(165)
+        textPaint.textSize = 4.4f * unit
+        textPaint.letterSpacing = 0.03f
+        canvas.drawText("EXP", gaugeLeft, bottom - 4f * unit, textPaint)
+        canvas.drawText("PROC", pivotX, bottom - 4f * unit, textPaint)
+        canvas.drawText("SAVE", gaugeRight, bottom - 4f * unit, textPaint)
+    }
+
     private fun drawSevenSegmentDigit(
         canvas: Canvas,
         digit: Int,
@@ -411,6 +642,7 @@ class XpanProcessingPanelView @JvmOverloads constructor(
     companion object {
         private const val BASE_WIDTH = 218f
         private const val BASE_HEIGHT = 112f
+        private const val WIDE_LAYOUT_ASPECT_RATIO = 2.15f
         private const val IDLE_NEEDLE_POSITION = 0f
         private val DIGIT_SEGMENTS = arrayOf(
             booleanArrayOf(true, true, true, true, true, true, false),

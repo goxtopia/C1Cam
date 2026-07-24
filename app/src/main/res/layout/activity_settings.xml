@@ -123,6 +123,35 @@
                         <View style="@style/C1_SettingsDivider" />
 
                         <LinearLayout
+                            android:id="@+id/xpan_ui_layout_row"
+                            style="@style/C1_SettingsRow">
+
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:orientation="vertical">
+
+                                <TextView
+                                    style="@style/C1_SettingsTitle"
+                                    android:text="XPAN UI layout" />
+
+                                <TextView
+                                    style="@style/C1_SettingsSubtitle"
+                                    android:text="Choose the viewfinder and instrument arrangement" />
+                            </LinearLayout>
+
+                            <TextView
+                                android:id="@+id/xpan_ui_layout_value"
+                                style="@style/C1_SettingsValue"
+                                tools:text="Scheme 1" />
+
+                            <ImageView style="@style/C1_SettingsChevron" />
+                        </LinearLayout>
+
+                        <View style="@style/C1_SettingsDivider" />
+
+                        <LinearLayout
                             android:id="@+id/xpan_instrument_theme_row"
                             style="@style/C1_SettingsRow">
 

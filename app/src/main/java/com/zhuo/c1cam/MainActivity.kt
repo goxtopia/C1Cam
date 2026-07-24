@@ -155,7 +155,8 @@ class MainActivity : AppCompatActivity() {
         appSettings = AppSettings(this)
         imageProcessor = ImageProcessor(this)
         applyXpanInstrumentTheme()
-        
+        xpanDashboard.setUiLayout(appSettings.xpanUiLayout)
+
         appSettings.lutName?.let { savedKey ->
             val normalizedKey = normalizeLutStorageKey(savedKey)
             val loadedLut = loadLutFromStorageKey(normalizedKey)
@@ -442,6 +443,7 @@ class MainActivity : AppCompatActivity() {
         updateXpanFocalValue()
         updateXpanMeteringButtonUi()
         applyXpanInstrumentTheme()
+        xpanDashboard.setUiLayout(appSettings.xpanUiLayout)
         overlay.isOverlayVisible = !appSettings.isXpanMode && !appSettings.isCropModeOff
         updateFocusModeUi()
         updateLockButtonsUi()
@@ -613,6 +615,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun applyXpanModeUi() {
         val enabled = appSettings.isXpanMode
+        xpanDashboard.setUiLayout(appSettings.xpanUiLayout)
         if (enabled) {
             overlay.isEditMode = false
         }
@@ -646,32 +649,51 @@ class MainActivity : AppCompatActivity() {
             if (enabled) {
                 val frame = XpanFrameLayoutModel.calculate(
                     mainViewContainer.width,
-                    mainViewContainer.height
+                    mainViewContainer.height,
+                    appSettings.xpanUiLayout
                 )
                 params.width = frame.width
                 params.height = frame.height
                 val isVerticalFrame = frame.height > frame.width
+                val isFullViewfinder =
+                    appSettings.xpanUiLayout == XpanUiLayout.SCHEME_2
                 xpanViewfinderLabel.text = if (isVerticalFrame) {
                     "24 × 65  ·  AF-C"
                 } else {
                     "65 × 24  ·  AF-C"
                 }
-                params.gravity = Gravity.TOP or if (isVerticalFrame) Gravity.END else Gravity.START
-                params.setMargins(
-                    if (isVerticalFrame) 0 else dp(16),
-                    dp(18),
-                    if (isVerticalFrame) dp(16) else 0,
-                    0
-                )
+                params.gravity = when {
+                    isVerticalFrame -> Gravity.TOP or Gravity.END
+                    isFullViewfinder -> Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                    else -> Gravity.TOP or Gravity.START
+                }
+                if (isFullViewfinder && !isVerticalFrame) {
+                    params.setMargins(0, dp(18), 0, 0)
+                } else {
+                    params.setMargins(
+                        if (isVerticalFrame) 0 else dp(16),
+                        dp(18),
+                        if (isVerticalFrame) dp(16) else 0,
+                        0
+                    )
+                }
                 cameraContainer.setBackgroundResource(R.drawable.bg_xpan_viewfinder)
                 cameraContainer.setPadding(dp(4), dp(4), dp(4), dp(4))
                 cameraContainer.clipToOutline = true
 
                 val labelParams = xpanViewfinderLabel.layoutParams as
                     android.widget.FrameLayout.LayoutParams
-                labelParams.gravity = Gravity.TOP or if (isVerticalFrame) Gravity.END else Gravity.START
+                labelParams.gravity = Gravity.TOP or
+                    if (isVerticalFrame) Gravity.END else Gravity.START
+                val centeredFrameLeft = (
+                    (mainViewContainer.width - frame.width) / 2
+                    ).coerceAtLeast(0)
                 labelParams.setMargins(
-                    if (isVerticalFrame) 0 else dp(27),
+                    when {
+                        isVerticalFrame -> 0
+                        isFullViewfinder -> centeredFrameLeft + dp(11)
+                        else -> dp(27)
+                    },
                     dp(29),
                     if (isVerticalFrame) dp(27) else 0,
                     0
@@ -880,12 +902,13 @@ class MainActivity : AppCompatActivity() {
             containerWidth = mainViewContainer.width,
             containerHeight = mainViewContainer.height,
             density = resources.displayMetrics.density,
-            displayRotation = displayRotation
+            displayRotation = displayRotation,
+            uiLayout = appSettings.xpanUiLayout
         )
         val column = infoLayout.column
         val processingPanelParams = xpanProcessingPanel.layoutParams as
             android.widget.FrameLayout.LayoutParams
-        processingPanelParams.width = column.right - column.left
+        processingPanelParams.width = column.lcdRight - column.lcdLeft
         processingPanelParams.height = column.lcdBottom - column.lcdTop
         processingPanelParams.gravity = Gravity.TOP or Gravity.START
         processingPanelParams.setMargins(

@@ -49,10 +49,10 @@ class XpanDashboardView @JvmOverloads constructor(
     private var latestSensorRollDegrees = 0f
     private var pitchDegrees = 0f
     private var deviceRotationDegrees = 0f
-    private var contentRotationDegrees = 0f
     private var displayRotation = Surface.ROTATION_0
     private var histogram = FloatArray(64)
     private var instrumentTheme = XpanInstrumentTheme.GREEN
+    private var uiLayout = XpanUiLayout.SCHEME_1
 
     fun setActive(active: Boolean) {
         if (isActive == active) return
@@ -76,6 +76,12 @@ class XpanDashboardView @JvmOverloads constructor(
         postInvalidateOnAnimation()
     }
 
+    fun setUiLayout(layout: XpanUiLayout) {
+        if (uiLayout == layout) return
+        uiLayout = layout
+        postInvalidateOnAnimation()
+    }
+
     fun setOrientation(deviceRotation: Int, displayRotation: Int) {
         this.displayRotation = displayRotation
         deviceRotationDegrees = when (deviceRotation) {
@@ -84,10 +90,6 @@ class XpanDashboardView @JvmOverloads constructor(
             Surface.ROTATION_270 -> -90f
             else -> 0f
         }
-        contentRotationDegrees = OrientationMath.controlRotationDegrees(
-            deviceRotation = deviceRotation,
-            displayRotation = displayRotation
-        ).toFloat()
         rawRollDegrees = latestSensorRollDegrees
         postInvalidateOnAnimation()
     }
@@ -127,6 +129,7 @@ class XpanDashboardView @JvmOverloads constructor(
         super.onDraw(canvas)
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), backgroundPaint)
         drawHeader(canvas)
+        drawInstrumentGridRails(canvas)
         drawLevel(canvas)
         drawHistogram(canvas)
     }
@@ -149,6 +152,10 @@ class XpanDashboardView @JvmOverloads constructor(
     }
 
     private fun drawHeader(canvas: Canvas) {
+        if (uiLayout == XpanUiLayout.SCHEME_2) {
+            drawScheme2Inscription(canvas)
+            return
+        }
         val landscape = width > height
         val cx = if (landscape) width * 0.56f else width * 0.31f
         val cy = if (landscape) height * 0.16f else dp(24f)
@@ -163,11 +170,58 @@ class XpanDashboardView @JvmOverloads constructor(
         canvas.drawText("PANORAMIC FILM BACK", cx, cy + dp(17f), textPaint)
     }
 
+    private fun drawScheme2Inscription(canvas: Canvas) {
+        val layout = instrumentLayout()
+        val column = layout.column
+        canvas.save()
+        applyFixedLandscapeTransform(canvas, layout.rotationDegrees)
+
+        val left = dp(20f)
+        val availableRight = (column.left - dp(14f)).coerceAtLeast(left + dp(40f))
+        val centerY = (column.histogramTop + column.histogramBottom) / 2f
+        textPaint.textAlign = Paint.Align.LEFT
+        textPaint.color = instrumentTheme.accent
+        textPaint.textSize = sp(9f)
+        textPaint.letterSpacing = 0.15f
+        canvas.drawText("XPAN  ·  65:24", left, centerY - dp(19f), textPaint)
+
+        textPaint.color = Color.argb(155, 239, 243, 238)
+        textPaint.textSize = sp(6.2f)
+        textPaint.letterSpacing = 0.14f
+        canvas.drawText("PANORAMIC FILM BACK", left, centerY - dp(4f), textPaint)
+
+        linePaint.color = Color.argb(90, 154, 166, 156)
+        linePaint.strokeWidth = dp(0.7f)
+        canvas.drawLine(left, centerY + dp(7f), availableRight, centerY + dp(7f), linePaint)
+
+        textPaint.color = Color.argb(125, 239, 243, 238)
+        textPaint.textSize = sp(5.4f)
+        textPaint.letterSpacing = 0.11f
+        canvas.drawText("C1 OPTICAL SYSTEM  /  FRAME 65 × 24", left, centerY + dp(21f), textPaint)
+        canvas.restore()
+    }
+
+    private fun instrumentLayout(): XpanFixedLandscapeInfoLayout {
+        return XpanInfoColumnLayoutModel.calculate(
+            containerWidth = width,
+            containerHeight = height,
+            density = resources.displayMetrics.density,
+            displayRotation = displayRotation,
+            uiLayout = uiLayout
+        )
+    }
+
     private fun drawLevel(canvas: Canvas) {
-        val landscape = width > height
-        val cx = if (landscape) width * 0.55f else width * 0.32f
-        val cy = if (landscape) height * 0.53f else height * 0.39f
-        val radius = if (landscape) height * 0.29f else minOf(width, height) * 0.18f
+        val layout = instrumentLayout()
+        val column = layout.column
+        val rect = RectF(
+            column.levelLeft.toFloat(),
+            column.levelTop.toFloat(),
+            column.levelRight.toFloat(),
+            column.levelBottom.toFloat()
+        )
+        if (rect.width() <= dp(24f) || rect.height() <= dp(24f)) return
+
         val levelRollDegrees = normalizeSigned(rawRollDegrees - deviceRotationDegrees)
         val isLevel = kotlin.math.abs(levelRollDegrees) < 1.2f &&
             kotlin.math.abs(pitchDegrees) < 1.2f
@@ -176,77 +230,78 @@ class XpanDashboardView @JvmOverloads constructor(
         } else {
             Color.rgb(230, 157, 69)
         }
-        val bezelRadius = radius + dp(15f)
 
         canvas.save()
-        canvas.rotate(contentRotationDegrees, cx, cy)
+        applyFixedLandscapeTransform(canvas, layout.rotationDegrees)
 
-        fillPaint.color = Color.argb(38, 0, 0, 0)
-        canvas.drawCircle(cx + dp(4f), cy + dp(6f), bezelRadius + dp(4f), fillPaint)
-        fillPaint.color = Color.argb(42, 0, 0, 0)
-        canvas.drawCircle(cx + dp(2f), cy + dp(3f), bezelRadius + dp(2f), fillPaint)
-
-        fillPaint.shader = RadialGradient(
-            cx - bezelRadius * 0.28f,
-            cy - bezelRadius * 0.34f,
-            bezelRadius * 1.45f,
+        fillPaint.shader = LinearGradient(
+            rect.left,
+            rect.top,
+            rect.left,
+            rect.bottom,
             intArrayOf(
-                Color.rgb(119, 124, 119),
-                Color.rgb(50, 54, 51),
-                Color.rgb(17, 19, 18),
-                Color.rgb(5, 7, 6)
-            ),
-            floatArrayOf(0f, 0.36f, 0.76f, 1f),
-            Shader.TileMode.CLAMP
-        )
-        canvas.drawCircle(cx, cy, bezelRadius, fillPaint)
-        fillPaint.shader = null
-        linePaint.color = Color.argb(180, 203, 208, 201)
-        linePaint.strokeWidth = dp(0.9f)
-        canvas.drawCircle(cx, cy, bezelRadius - dp(1f), linePaint)
-        linePaint.color = Color.argb(100, 0, 0, 0)
-        linePaint.strokeWidth = dp(2f)
-        canvas.drawCircle(cx, cy, radius + dp(5f), linePaint)
-
-        fillPaint.shader = RadialGradient(
-            cx - radius * 0.22f,
-            cy - radius * 0.28f,
-            radius * 1.38f,
-            intArrayOf(
-                Color.rgb(40, 45, 41),
-                Color.rgb(17, 21, 18),
+                Color.rgb(65, 70, 66),
+                Color.rgb(24, 28, 25),
                 Color.rgb(7, 9, 8)
             ),
-            floatArrayOf(0f, 0.58f, 1f),
+            null,
             Shader.TileMode.CLAMP
         )
-        canvas.drawCircle(cx, cy, radius, fillPaint)
+        canvas.drawRoundRect(rect, dp(9f), dp(9f), fillPaint)
         fillPaint.shader = null
+        linePaint.color = Color.argb(150, 190, 196, 188)
+        linePaint.strokeWidth = dp(1f)
+        canvas.drawRoundRect(rect, dp(9f), dp(9f), linePaint)
 
-        val screwRadius = radius + dp(9.5f)
-        for (angle in intArrayOf(45, 135, 225, 315)) {
-            val radians = Math.toRadians(angle.toDouble())
-            val screwX = cx + (kotlin.math.sin(radians) * screwRadius).toFloat()
-            val screwY = cy - (kotlin.math.cos(radians) * screwRadius).toFloat()
-            fillPaint.color = Color.rgb(12, 14, 13)
-            canvas.drawCircle(screwX, screwY, dp(2.3f), fillPaint)
-            linePaint.color = Color.argb(145, 205, 210, 203)
-            linePaint.strokeWidth = dp(0.65f)
-            canvas.drawLine(
-                screwX - dp(1.15f),
-                screwY + dp(0.5f),
-                screwX + dp(1.15f),
-                screwY - dp(0.5f),
-                linePaint
-            )
-        }
+        val screen = RectF(
+            rect.left + dp(5f),
+            rect.top + dp(5f),
+            rect.right - dp(5f),
+            rect.bottom - dp(5f)
+        )
+        fillPaint.shader = LinearGradient(
+            screen.left,
+            screen.top,
+            screen.right,
+            screen.bottom,
+            intArrayOf(
+                Color.rgb(24, 28, 25),
+                Color.rgb(11, 14, 12),
+                Color.rgb(5, 7, 6)
+            ),
+            null,
+            Shader.TileMode.CLAMP
+        )
+        canvas.drawRoundRect(screen, dp(4f), dp(4f), fillPaint)
+        fillPaint.shader = null
+        linePaint.color = Color.argb(90, 225, 232, 224)
+        linePaint.strokeWidth = dp(0.75f)
+        canvas.drawRoundRect(screen, dp(4f), dp(4f), linePaint)
+
+        textPaint.textAlign = Paint.Align.RIGHT
+        textPaint.textSize = sp(5.7f)
+        textPaint.letterSpacing = 0.08f
+        textPaint.color = accent
+        canvas.drawText(
+            if (isLevel) "LEVEL" else "TRIM",
+            screen.right - dp(8f),
+            screen.top + dp(13f),
+            textPaint
+        )
+
+        val readoutHeight = dp(20f).coerceAtMost(screen.height() * 0.22f)
+        val gauge = RectF(
+            screen.left + dp(8f),
+            screen.top + dp(15f),
+            screen.right - dp(8f),
+            screen.bottom - readoutHeight - dp(7f)
+        )
+        val cx = gauge.centerX()
+        val cy = gauge.centerY() + dp(3f)
+        val radius = minOf(gauge.width() * 0.43f, gauge.height() * 0.73f)
 
         linePaint.strokeWidth = dp(0.8f)
-        linePaint.color = Color.argb(92, 238, 242, 237)
-        canvas.drawCircle(cx, cy, radius, linePaint)
-        canvas.drawCircle(cx, cy, radius * 0.68f, linePaint)
-
-        for (angle in -90..90 step 5) {
+        for (angle in -60..60 step 5) {
             val radians = Math.toRadians(angle.toDouble())
             val inner = when {
                 angle % 30 == 0 -> radius * 0.78f
@@ -267,15 +322,15 @@ class XpanDashboardView @JvmOverloads constructor(
         }
 
         textPaint.textAlign = Paint.Align.CENTER
-        textPaint.textSize = sp(6.2f)
+        textPaint.textSize = sp(5.3f)
         textPaint.letterSpacing = 0.04f
         textPaint.color = Color.argb(160, 236, 240, 235)
         for (angle in intArrayOf(-60, -30, 0, 30, 60)) {
             val radians = Math.toRadians(angle.toDouble())
-            val labelRadius = radius * 0.69f
+            val labelRadius = radius * 0.66f
             val labelX = cx + (kotlin.math.sin(radians) * labelRadius).toFloat()
             val labelY = cy - (kotlin.math.cos(radians) * labelRadius).toFloat() +
-                dp(2.1f)
+                dp(1.8f)
             canvas.drawText(
                 if (angle > 0) "+$angle" else angle.toString(),
                 labelX,
@@ -308,18 +363,18 @@ class XpanDashboardView @JvmOverloads constructor(
             )
         }
         linePaint.color = accent
-        linePaint.strokeWidth = dp(2.1f)
+        linePaint.strokeWidth = dp(1.7f)
         canvas.drawLine(
-            cx - radius * 0.74f,
+            cx - radius * 0.72f,
             cy + pitchOffset,
-            cx - dp(12f),
+            cx - dp(9f),
             cy + pitchOffset,
             linePaint
         )
         canvas.drawLine(
-            cx + dp(12f),
+            cx + dp(9f),
             cy + pitchOffset,
-            cx + radius * 0.74f,
+            cx + radius * 0.72f,
             cy + pitchOffset,
             linePaint
         )
@@ -333,17 +388,17 @@ class XpanDashboardView @JvmOverloads constructor(
         )
         canvas.restore()
 
-        val bubbleX = cx + (levelRollDegrees.coerceIn(-12f, 12f) / 12f) * radius * 0.42f
-        val bubbleY = cy + (pitchDegrees.coerceIn(-12f, 12f) / 12f) * radius * 0.42f
+        val bubbleX = cx + (levelRollDegrees.coerceIn(-12f, 12f) / 12f) * radius * 0.36f
+        val bubbleY = cy + (pitchDegrees.coerceIn(-12f, 12f) / 12f) * radius * 0.36f
         fillPaint.color = Color.argb(95, 0, 0, 0)
-        canvas.drawCircle(bubbleX + dp(1.3f), bubbleY + dp(1.8f), dp(8.2f), fillPaint)
+        canvas.drawCircle(bubbleX + dp(1f), bubbleY + dp(1.3f), dp(6.2f), fillPaint)
         linePaint.color = accent
-        linePaint.strokeWidth = dp(1.3f)
-        canvas.drawCircle(bubbleX, bubbleY, dp(8f), linePaint)
+        linePaint.strokeWidth = dp(1.1f)
+        canvas.drawCircle(bubbleX, bubbleY, dp(6f), linePaint)
         fillPaint.shader = RadialGradient(
-            bubbleX - dp(2.2f),
-            bubbleY - dp(2.6f),
-            dp(9f),
+            bubbleX - dp(1.6f),
+            bubbleY - dp(1.8f),
+            dp(7f),
             intArrayOf(
                 Color.argb(245, 246, 250, 235),
                 accent,
@@ -352,22 +407,22 @@ class XpanDashboardView @JvmOverloads constructor(
             floatArrayOf(0f, 0.42f, 1f),
             Shader.TileMode.CLAMP
         )
-        canvas.drawCircle(bubbleX, bubbleY, dp(6.4f), fillPaint)
+        canvas.drawCircle(bubbleX, bubbleY, dp(4.8f), fillPaint)
         fillPaint.shader = null
         fillPaint.color = Color.rgb(10, 12, 11)
-        canvas.drawCircle(bubbleX, bubbleY, dp(1.7f), fillPaint)
+        canvas.drawCircle(bubbleX, bubbleY, dp(1.2f), fillPaint)
         fillPaint.color = Color.argb(175, 255, 255, 255)
-        canvas.drawCircle(bubbleX - dp(2f), bubbleY - dp(2.3f), dp(1.15f), fillPaint)
+        canvas.drawCircle(bubbleX - dp(1.5f), bubbleY - dp(1.7f), dp(0.85f), fillPaint)
 
         textPaint.textAlign = Paint.Align.CENTER
         textPaint.color = Color.argb(205, 239, 243, 238)
-        textPaint.textSize = sp(8f)
+        textPaint.textSize = sp(6.5f)
         textPaint.letterSpacing = 0.04f
         val readout = RectF(
-            cx - radius * 0.56f,
-            cy + radius * 0.67f,
-            cx + radius * 0.56f,
-            cy + radius * 0.88f
+            screen.left + dp(8f),
+            screen.bottom - readoutHeight,
+            screen.right - dp(8f),
+            screen.bottom - dp(4f)
         )
         fillPaint.color = Color.argb(210, 4, 7, 5)
         canvas.drawRoundRect(readout, dp(2.5f), dp(2.5f), fillPaint)
@@ -376,15 +431,15 @@ class XpanDashboardView @JvmOverloads constructor(
         canvas.drawRoundRect(readout, dp(2.5f), dp(2.5f), linePaint)
         canvas.drawText(
             String.format(Locale.US, "%+.1f°  /  %+.1f°", levelRollDegrees, pitchDegrees),
-            cx,
-            readout.centerY() + dp(3f),
+            readout.centerX(),
+            readout.centerY() + dp(2.4f),
             textPaint
         )
 
         levelPath.reset()
-        levelPath.moveTo(cx, cy - radius - dp(4f))
-        levelPath.lineTo(cx - dp(5f), cy - radius + dp(5f))
-        levelPath.lineTo(cx + dp(5f), cy - radius + dp(5f))
+        levelPath.moveTo(cx, gauge.top)
+        levelPath.lineTo(cx - dp(4f), gauge.top + dp(6f))
+        levelPath.lineTo(cx + dp(4f), gauge.top + dp(6f))
         levelPath.close()
         fillPaint.color = accent
         canvas.drawPath(levelPath, fillPaint)
@@ -393,17 +448,12 @@ class XpanDashboardView @JvmOverloads constructor(
     }
 
     private fun drawHistogram(canvas: Canvas) {
-        val layout = XpanInfoColumnLayoutModel.calculate(
-            containerWidth = width,
-            containerHeight = height,
-            density = resources.displayMetrics.density,
-            displayRotation = displayRotation
-        )
+        val layout = instrumentLayout()
         val column = layout.column
         val rect = RectF(
-            column.left.toFloat(),
+            column.histogramLeft.toFloat(),
             column.histogramTop.toFloat(),
-            column.right.toFloat(),
+            column.histogramRight.toFloat(),
             column.histogramBottom.toFloat()
         )
         canvas.save()
@@ -456,11 +506,7 @@ class XpanDashboardView @JvmOverloads constructor(
         textPaint.color = instrumentTheme.ink
         textPaint.textSize = sp(7.5f)
         textPaint.letterSpacing = 0.16f
-        canvas.drawText("LUMA SCOPE", screen.left + dp(9f), screen.top + dp(15f), textPaint)
-        textPaint.textAlign = Paint.Align.RIGHT
-        textPaint.textSize = sp(6.5f)
-        textPaint.letterSpacing = 0.08f
-        canvas.drawText("Y  0—255", screen.right - dp(9f), screen.top + dp(15f), textPaint)
+        canvas.drawText("LUMA", screen.left + dp(9f), screen.top + dp(15f), textPaint)
 
         val graph = RectF(
             screen.left + dp(9f),
@@ -522,6 +568,55 @@ class XpanDashboardView @JvmOverloads constructor(
         canvas.drawLine(graph.right, graph.top, graph.right - cornerLength, graph.top, linePaint)
         canvas.drawLine(graph.right, graph.top, graph.right, graph.top + cornerLength, linePaint)
         linePaint.strokeCap = Paint.Cap.ROUND
+        canvas.restore()
+    }
+
+    private fun drawInstrumentGridRails(canvas: Canvas) {
+        val layout = instrumentLayout()
+        val column = layout.column
+        canvas.save()
+        applyFixedLandscapeTransform(canvas, layout.rotationDegrees)
+
+        linePaint.color = Color.argb(95, 154, 166, 156)
+        linePaint.strokeWidth = dp(0.7f)
+        fillPaint.color = instrumentTheme.accent
+        if (uiLayout == XpanUiLayout.SCHEME_1) {
+            val verticalX = (column.histogramRight + column.lcdLeft) / 2f
+            val horizontalY = (column.levelBottom + column.histogramTop) / 2f
+            canvas.drawLine(
+                verticalX,
+                column.histogramTop + dp(7f),
+                verticalX,
+                column.histogramBottom - dp(7f),
+                linePaint
+            )
+            canvas.drawLine(
+                column.lcdLeft + dp(7f),
+                horizontalY,
+                column.right - dp(7f),
+                horizontalY,
+                linePaint
+            )
+            canvas.drawCircle(verticalX, horizontalY, dp(1.4f), fillPaint)
+        } else {
+            val firstRailX = (column.histogramRight + column.levelLeft) / 2f
+            val secondRailX = (column.levelRight + column.lcdLeft) / 2f
+            for (railX in floatArrayOf(firstRailX, secondRailX)) {
+                canvas.drawLine(
+                    railX,
+                    column.histogramTop + dp(7f),
+                    railX,
+                    column.histogramBottom - dp(7f),
+                    linePaint
+                )
+                canvas.drawCircle(
+                    railX,
+                    (column.histogramTop + column.histogramBottom) / 2f,
+                    dp(1.3f),
+                    fillPaint
+                )
+            }
+        }
         canvas.restore()
     }
 

@@ -40,6 +40,7 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var jpegQualityValue: TextView
     private lateinit var chromaDenoiseValue: TextView
     private lateinit var inactivityTimeoutValue: TextView
+    private lateinit var xpanUiLayoutValue: TextView
     private lateinit var xpanInstrumentThemeValue: TextView
 
     private var selectionMode: SelectionMode? = null
@@ -80,6 +81,7 @@ class SettingsActivity : AppCompatActivity() {
         jpegQualityValue = findViewById(R.id.jpeg_quality_value)
         chromaDenoiseValue = findViewById(R.id.chroma_denoise_value)
         inactivityTimeoutValue = findViewById(R.id.inactivity_timeout_value)
+        xpanUiLayoutValue = findViewById(R.id.xpan_ui_layout_value)
         xpanInstrumentThemeValue = findViewById(R.id.xpan_instrument_theme_value)
 
         findViewById<View>(R.id.settings_back).setOnClickListener {
@@ -119,6 +121,9 @@ class SettingsActivity : AppCompatActivity() {
         }
         findViewById<View>(R.id.xpan_instrument_theme_row).setOnClickListener {
             openSelectionPage(SelectionMode.XPAN_INSTRUMENT_THEME)
+        }
+        findViewById<View>(R.id.xpan_ui_layout_row).setOnClickListener {
+            openSelectionPage(SelectionMode.XPAN_UI_LAYOUT)
         }
         findViewById<View>(R.id.import_lut_row).setOnClickListener {
             importLutLauncher.launch(arrayOf("text/plain", "application/octet-stream"))
@@ -199,6 +204,7 @@ class SettingsActivity : AppCompatActivity() {
             SelectionMode.JPEG_QUALITY -> jpegQualityChoices()
             SelectionMode.CHROMA_DENOISE -> chromaDenoiseChoices()
             SelectionMode.INACTIVITY_TIMEOUT -> inactivityTimeoutChoices()
+            SelectionMode.XPAN_UI_LAYOUT -> xpanUiLayoutChoices()
             SelectionMode.XPAN_INSTRUMENT_THEME -> xpanInstrumentThemeChoices()
         }
 
@@ -212,6 +218,7 @@ class SettingsActivity : AppCompatActivity() {
             SelectionMode.JPEG_QUALITY -> "JPEG quality"
             SelectionMode.CHROMA_DENOISE -> "Chroma noise reduction"
             SelectionMode.INACTIVITY_TIMEOUT -> "Auto-exit timeout"
+            SelectionMode.XPAN_UI_LAYOUT -> "XPAN UI layout"
             SelectionMode.XPAN_INSTRUMENT_THEME -> "XPAN instrument screen"
         }
         selectionHint.text = when (mode) {
@@ -224,6 +231,8 @@ class SettingsActivity : AppCompatActivity() {
             SelectionMode.JPEG_QUALITY -> "Higher quality produces larger JPEG files and takes longer to encode."
             SelectionMode.CHROMA_DENOISE -> "Auto selects strength from the ISO recorded for each capture."
             SelectionMode.INACTIVITY_TIMEOUT -> "The display stays awake until this period passes without interaction."
+            SelectionMode.XPAN_UI_LAYOUT ->
+                "Choose between the compact instrument grid and the full-width viewfinder."
             SelectionMode.XPAN_INSTRUMENT_THEME ->
                 "Applies one shared screen color to the histogram and processing LCD."
         }
@@ -290,6 +299,10 @@ class SettingsActivity : AppCompatActivity() {
 
             SelectionMode.XPAN_INSTRUMENT_THEME -> {
                 appSettings.xpanInstrumentTheme = choice.xpanInstrumentTheme ?: return
+            }
+
+            SelectionMode.XPAN_UI_LAYOUT -> {
+                appSettings.xpanUiLayout = choice.xpanUiLayout ?: return
             }
 
             null -> return
@@ -492,6 +505,16 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 
+    private fun xpanUiLayoutChoices(): List<Choice> {
+        return XpanUiLayout.entries.map { layout ->
+            Choice(
+                label = "${layout.displayName} · ${layout.description}",
+                xpanUiLayout = layout,
+                selected = appSettings.xpanUiLayout == layout
+            )
+        }
+    }
+
     private fun updateSummaries() {
         targetRatioValue.text = targetRatioLabel(appSettings.targetAspectRatio)
         focalLengthValue.text = "${appSettings.focalLength} mm"
@@ -504,6 +527,7 @@ class SettingsActivity : AppCompatActivity() {
         inactivityTimeoutValue.text = InactivityTimeout.label(
             appSettings.inactivityTimeoutMinutes
         )
+        xpanUiLayoutValue.text = appSettings.xpanUiLayout.displayName
         xpanInstrumentThemeValue.text = appSettings.xpanInstrumentTheme.displayName
     }
 
@@ -672,6 +696,7 @@ class SettingsActivity : AppCompatActivity() {
         JPEG_QUALITY,
         CHROMA_DENOISE,
         INACTIVITY_TIMEOUT,
+        XPAN_UI_LAYOUT,
         XPAN_INSTRUMENT_THEME
     }
 
@@ -683,6 +708,7 @@ class SettingsActivity : AppCompatActivity() {
         val outputFormat: ImageOutputFormat? = null,
         val toneMapPreset: ToneMapPreset? = null,
         val chromaDenoiseMode: ChromaDenoiseMode? = null,
+        val xpanUiLayout: XpanUiLayout? = null,
         val xpanInstrumentTheme: XpanInstrumentTheme? = null,
         val selected: Boolean = false
     )

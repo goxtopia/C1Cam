@@ -95,4 +95,22 @@ class XpanModeTest {
         assertTrue(frame.width > frame.height)
         assertEquals(XpanMode.ASPECT_RATIO, frame.width.toFloat() / frame.height, 0.03f)
     }
+
+    @Test
+    fun scheme_two_expands_the_viewfinder_without_changing_its_ratio() {
+        val compact = XpanFrameLayoutModel.calculate(
+            containerWidth = 1080,
+            containerHeight = 1800,
+            uiLayout = XpanUiLayout.SCHEME_1
+        )
+        val full = XpanFrameLayoutModel.calculate(
+            containerWidth = 1080,
+            containerHeight = 1800,
+            uiLayout = XpanUiLayout.SCHEME_2
+        )
+
+        assertTrue(full.height > compact.height)
+        assertTrue(full.width > compact.width)
+        assertEquals(XpanMode.ASPECT_RATIO, full.height.toFloat() / full.width, 0.03f)
+    }
 }

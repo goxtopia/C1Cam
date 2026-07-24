@@ -28,6 +28,7 @@ class AppSettings(private val context: Context) {
     var imageOutputFormat: ImageOutputFormat = ImageOutputFormat.JPEG
     var jpegQuality: Int = JpegQuality.DEFAULT
     var isXpanMode: Boolean = false
+    var xpanUiLayout: XpanUiLayout = XpanUiLayout.SCHEME_1
     var xpanMeteringMode: XpanMeteringMode = XpanMeteringMode.CENTER_WEIGHTED
     var xpanInstrumentTheme: XpanInstrumentTheme = XpanInstrumentTheme.GREEN
     var inactivityTimeoutMinutes: Int = InactivityTimeout.DEFAULT_MINUTES
@@ -72,6 +73,9 @@ class AppSettings(private val context: Context) {
             prefs.getInt(KEY_JPEG_QUALITY, JpegQuality.DEFAULT)
         )
         isXpanMode = prefs.getBoolean(KEY_XPAN_MODE, false)
+        xpanUiLayout = XpanUiLayout.fromStorageValue(
+            prefs.getString(KEY_XPAN_UI_LAYOUT, XpanUiLayout.SCHEME_1.storageValue)
+        )
         xpanMeteringMode = XpanMeteringMode.fromStorageValue(
             prefs.getString(KEY_XPAN_METERING_MODE, XpanMeteringMode.CENTER_WEIGHTED.storageValue)
         )
@@ -125,6 +129,7 @@ class AppSettings(private val context: Context) {
         editor.putString(KEY_IMAGE_OUTPUT_FORMAT, imageOutputFormat.storageValue)
         editor.putInt(KEY_JPEG_QUALITY, jpegQuality)
         editor.putBoolean(KEY_XPAN_MODE, isXpanMode)
+        editor.putString(KEY_XPAN_UI_LAYOUT, xpanUiLayout.storageValue)
         editor.putString(KEY_XPAN_METERING_MODE, xpanMeteringMode.storageValue)
         editor.putString(KEY_XPAN_INSTRUMENT_THEME, xpanInstrumentTheme.storageValue)
         editor.putInt(KEY_INACTIVITY_TIMEOUT_MINUTES, inactivityTimeoutMinutes)
@@ -167,6 +172,7 @@ class AppSettings(private val context: Context) {
         private const val KEY_IMAGE_OUTPUT_FORMAT = "image_output_format"
         private const val KEY_JPEG_QUALITY = "jpeg_quality"
         private const val KEY_XPAN_MODE = "xpan_mode"
+        private const val KEY_XPAN_UI_LAYOUT = "xpan_ui_layout"
         private const val KEY_XPAN_METERING_MODE = "xpan_metering_mode"
         private const val KEY_XPAN_INSTRUMENT_THEME = "xpan_instrument_theme"
         private const val KEY_INACTIVITY_TIMEOUT_MINUTES = "inactivity_timeout_minutes"
