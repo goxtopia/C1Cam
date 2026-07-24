@@ -17,10 +17,10 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.C1Cam">
         <activity
-            android:name=".SettingsActivity"
+            android:name=".ui.SettingsActivity"
             android:exported="false" />
         <activity
-            android:name=".MainActivity"
+            android:name=".ui.MainActivity"
             android:showWhenLocked="true"
             android:showForAllUsers="true"
             android:turnScreenOn="true"

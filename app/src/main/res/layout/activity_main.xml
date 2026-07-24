@@ -161,7 +161,7 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/top_controls">
 
-        <com.zhuo.c1cam.XpanDashboardView
+        <com.zhuo.c1cam.xpan.XpanDashboardView
             android:id="@+id/xpan_dashboard"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
@@ -179,12 +179,12 @@
                 android:background="@color/black"
                 app:scaleType="fitCenter" />
 
-            <com.zhuo.c1cam.OverlayView
+            <com.zhuo.c1cam.ui.OverlayView
                 android:id="@+id/overlay"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent" />
 
-            <com.zhuo.c1cam.XpanViewfinderOverlayView
+            <com.zhuo.c1cam.xpan.XpanViewfinderOverlayView
                 android:id="@+id/xpan_viewfinder_overlay"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
@@ -234,7 +234,7 @@
             android:textColor="@color/cam_text_primary"
             android:textSize="9sp" />
 
-        <com.zhuo.c1cam.XpanProcessingPanelView
+        <com.zhuo.c1cam.xpan.XpanProcessingPanelView
             android:id="@+id/xpan_processing_panel"
             android:layout_width="218dp"
             android:layout_height="112dp"
@@ -289,7 +289,7 @@
                     android:layout_marginStart="10dp"
                     android:layout_weight="1">
 
-                    <com.zhuo.c1cam.InstrumentScaleView
+                    <com.zhuo.c1cam.ui.InstrumentScaleView
                         android:layout_width="match_parent"
                         android:layout_height="match_parent"
                         app:scaleCenterAccent="true"
@@ -337,7 +337,7 @@
                     android:layout_marginStart="10dp"
                     android:layout_weight="1">
 
-                    <com.zhuo.c1cam.InstrumentScaleView
+                    <com.zhuo.c1cam.ui.InstrumentScaleView
                         android:layout_width="match_parent"
                         android:layout_height="match_parent"
                         app:scaleDivisions="20" />
@@ -508,7 +508,7 @@
                     android:layout_marginStart="10dp"
                     android:layout_weight="1">
 
-                    <com.zhuo.c1cam.InstrumentScaleView
+                    <com.zhuo.c1cam.ui.InstrumentScaleView
                         android:layout_width="match_parent"
                         android:layout_height="match_parent"
                         app:scaleCenterAccent="true"
@@ -555,7 +555,7 @@
                     android:layout_marginStart="10dp"
                     android:layout_weight="1">
 
-                    <com.zhuo.c1cam.InstrumentScaleView
+                    <com.zhuo.c1cam.ui.InstrumentScaleView
                         android:layout_width="match_parent"
                         android:layout_height="match_parent"
                         app:scaleDivisions="13"
