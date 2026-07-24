@@ -37,7 +37,9 @@ import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.roundToInt
 
 private const val TAP_TO_FOCUS_DURATION_SECONDS = 15L
@@ -72,6 +74,10 @@ class CameraManager(
     @Volatile
     private var targetRotation: Int = Surface.ROTATION_0
     val cameraExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+    private val captureProcessingExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+    private val captureSaveExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+    private val captureInFlightLimiter = CaptureInFlightLimiter(MAX_CAPTURES_IN_FLIGHT)
+    private val captureSequence = AtomicLong(0L)
 
     fun startCamera() {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(activity)
@@ -187,6 +193,11 @@ class CameraManager(
 
     fun takePhoto() {
         val capture = imageCapture ?: return
+        if (!captureInFlightLimiter.tryAcquire()) {
+            Toast.makeText(activity, "Still processing photos", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val captureId = captureSequence.incrementAndGet()
 
         val viewW = viewFinder.width
         val viewH = viewFinder.height
@@ -197,69 +208,108 @@ class CameraManager(
         val captureStartedElapsedNanos = SystemClock.elapsedRealtimeNanos()
         val outputFormat = appSettings.imageOutputFormat
         val jpegQuality = appSettings.jpegQuality
+        val chromaDenoiseMode = appSettings.chromaDenoiseMode
+        val isCropModeOff = appSettings.isCropModeOff
+        val focalLength = appSettings.focalLength
+        val noCropAspectRatio = appSettings.noCropAspectRatio
+        val exposureCompensationEv = appSettings.evVal
         // Freeze orientation at shutter press; sensor changes during processing must not
         // alter the direction of the photo being saved.
         val savedImageRotationDegrees = savedImageRotationDegreesProvider()
         latestStillCaptureMetadata = null
 
-        capture.takePicture(
-            cameraExecutor,
-            object : ImageCapture.OnImageCapturedCallback() {
-                override fun onError(exc: ImageCaptureException) {
-                    Log.e("CameraManager", "Photo capture failed: ${exc.message}", exc)
-                    activity.runOnUiThread {
-                        Toast.makeText(activity, "Capture failed", Toast.LENGTH_SHORT).show()
+        try {
+            capture.takePicture(
+                captureProcessingExecutor,
+                object : ImageCapture.OnImageCapturedCallback() {
+                    override fun onError(exc: ImageCaptureException) {
+                        captureInFlightLimiter.release()
+                        Log.e("CameraManager", "Photo capture failed: ${exc.message}", exc)
+                        showCaptureResult("Capture failed")
                     }
-                }
 
-                override fun onCaptureSuccess(image: ImageProxy) {
-                    Log.i(
-                        CAPTURE_PERF_TAG,
-                        "stage=image_received latencyMs=${elapsedMillis(captureStartedElapsedNanos)} " +
-                            "size=${image.width}x${image.height} " +
-                            "rotation=${image.imageInfo.rotationDegrees}"
-                    )
-                    val captureMetadata = (latestStillCaptureMetadata ?: latestCaptureMetadata)?.copy(
-                        capturedAtMillis = captureStartedAt,
-                        equivalentFocalLengthMm = appSettings.focalLength,
-                        exposureCompensationEv = appSettings.evVal
-                    ) ?: CaptureMetadata(
-                        capturedAtMillis = captureStartedAt,
-                        iso = null,
-                        exposureTimeNs = null,
-                        aperture = null,
-                        physicalFocalLengthMm = null,
-                        equivalentFocalLengthMm = appSettings.focalLength,
-                        exposureCompensationEv = appSettings.evVal,
-                        isAutoWhiteBalance = null,
-                        isFlashFired = null
-                    )
-                    val saved = imageProcessor.processAndSaveImage(
-                        image,
-                        points,
-                        viewW,
-                        viewH,
-                        ratio,
-                        lut,
-                        appSettings.chromaDenoiseMode,
-                        appSettings.isCropModeOff,
-                        appSettings.focalLength,
-                        appSettings.noCropAspectRatio,
-                        outputFormat,
-                        jpegQuality,
-                        captureMetadata,
-                        savedImageRotationDegrees
-                    )
-                    activity.runOnUiThread {
-                        Toast.makeText(
-                            activity,
-                            if (saved) "Saved to Gallery" else "Could not save photo",
-                            Toast.LENGTH_SHORT
-                        ).show()
+                    override fun onCaptureSuccess(image: ImageProxy) {
+                        Log.i(
+                            CAPTURE_PERF_TAG,
+                            "capture=$captureId stage=image_received " +
+                                "latencyMs=${elapsedMillis(captureStartedElapsedNanos)} " +
+                                "size=${image.width}x${image.height} " +
+                                "rotation=${image.imageInfo.rotationDegrees}"
+                        )
+                        val captureMetadata = (latestStillCaptureMetadata ?: latestCaptureMetadata)?.copy(
+                            capturedAtMillis = captureStartedAt,
+                            equivalentFocalLengthMm = focalLength,
+                            exposureCompensationEv = exposureCompensationEv
+                        ) ?: CaptureMetadata(
+                            capturedAtMillis = captureStartedAt,
+                            iso = null,
+                            exposureTimeNs = null,
+                            aperture = null,
+                            physicalFocalLengthMm = null,
+                            equivalentFocalLengthMm = focalLength,
+                            exposureCompensationEv = exposureCompensationEv,
+                            isAutoWhiteBalance = null,
+                            isFlashFired = null
+                        )
+
+                        val processedCapture = try {
+                            imageProcessor.processCapturedImage(
+                                captureId,
+                                image,
+                                points,
+                                viewW,
+                                viewH,
+                                ratio,
+                                lut,
+                                chromaDenoiseMode,
+                                isCropModeOff,
+                                focalLength,
+                                noCropAspectRatio,
+                                outputFormat,
+                                jpegQuality,
+                                captureMetadata,
+                                savedImageRotationDegrees
+                            )
+                        } catch (error: Exception) {
+                            captureInFlightLimiter.release()
+                            Log.e("CameraManager", "Photo processing failed", error)
+                            showCaptureResult("Could not process photo")
+                            return
+                        }
+
+                        try {
+                            captureSaveExecutor.execute {
+                                val saved = try {
+                                    imageProcessor.saveProcessedImage(processedCapture)
+                                } catch (error: Exception) {
+                                    Log.e("CameraManager", "Photo save failed", error)
+                                    false
+                                } finally {
+                                    captureInFlightLimiter.release()
+                                }
+                                showCaptureResult(
+                                    if (saved) "Saved to Gallery" else "Could not save photo"
+                                )
+                            }
+                        } catch (error: RejectedExecutionException) {
+                            processedCapture.recycle()
+                            captureInFlightLimiter.release()
+                            Log.w("CameraManager", "Photo save rejected during shutdown", error)
+                        }
                     }
                 }
-            }
-        )
+            )
+        } catch (error: RuntimeException) {
+            captureInFlightLimiter.release()
+            Log.e("CameraManager", "Could not submit photo capture", error)
+            showCaptureResult("Capture failed")
+        }
+    }
+
+    private fun showCaptureResult(message: String) {
+        activity.runOnUiThread {
+            Toast.makeText(activity, message, Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun createImageAnalysis(policy: PreviewAnalysisPolicy): ImageAnalysis {
@@ -652,17 +702,25 @@ class CameraManager(
     }
 
     fun shutdown() {
-        cameraExecutor.shutdown()
-        try {
-            if (!cameraExecutor.awaitTermination(2, TimeUnit.SECONDS)) {
-                cameraExecutor.shutdownNow()
-            }
-        } catch (e: InterruptedException) {
-            cameraExecutor.shutdownNow()
-            Thread.currentThread().interrupt()
-        }
+        shutdownExecutor(cameraExecutor)
+        // Keep the save executor alive until all GPU work has had a chance to enqueue
+        // its completed bitmap.
+        shutdownExecutor(captureProcessingExecutor)
+        shutdownExecutor(captureSaveExecutor)
         imageProcessor.shutdown()
         GlRectificationUtils.release()
+    }
+
+    private fun shutdownExecutor(executor: ExecutorService) {
+        executor.shutdown()
+        try {
+            if (!executor.awaitTermination(EXECUTOR_SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                executor.shutdownNow()
+            }
+        } catch (e: InterruptedException) {
+            executor.shutdownNow()
+            Thread.currentThread().interrupt()
+        }
     }
 
     private fun elapsedMillis(startNanos: Long): String {
@@ -675,5 +733,7 @@ class CameraManager(
 
     companion object {
         private const val CAPTURE_PERF_TAG = "C1CapturePerf"
+        private const val MAX_CAPTURES_IN_FLIGHT = 2
+        private const val EXECUTOR_SHUTDOWN_TIMEOUT_SECONDS = 5L
     }
 }

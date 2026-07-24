@@ -59,6 +59,8 @@ object StillCaptureGlPipeline {
     private val planeTextureWidths = IntArray(3)
     private val planeTextureHeights = IntArray(3)
     private val packedPlaneBuffers = arrayOfNulls<ByteBuffer>(3)
+    private val packedPlaneArrays = arrayOfNulls<ByteArray>(3)
+    private val planeRowArrays = arrayOfNulls<ByteArray>(3)
 
     private var outputTextureId = 0
     private var outputFramebufferId = 0
@@ -80,6 +82,7 @@ object StillCaptureGlPipeline {
 
     @Synchronized
     fun process(
+        captureId: Long,
         image: ImageProxy,
         geometry: StillCaptureGeometry,
         lut: Lut3D?,
@@ -89,7 +92,8 @@ object StillCaptureGlPipeline {
         if (image.planes.size < 3) {
             Log.w(
                 CAPTURE_PERF_TAG,
-                "stage=gpu_fallback reason=insufficient_planes count=${image.planes.size}"
+                "capture=$captureId stage=gpu_fallback " +
+                    "reason=insufficient_planes count=${image.planes.size}"
             )
             return null
         }
@@ -108,21 +112,21 @@ object StillCaptureGlPipeline {
             val chromaHeight = (rawHeight + 1) / 2
 
             val uploadStartedNanos = SystemClock.elapsedRealtimeNanos()
-            uploadPlane(
+            val yUpload = uploadPlane(
                 index = 0,
                 plane = image.planes[0],
                 width = rawWidth,
                 height = rawHeight,
                 defaultValue = 0
             )
-            uploadPlane(
+            val uUpload = uploadPlane(
                 index = 1,
                 plane = image.planes[1],
                 width = chromaWidth,
                 height = chromaHeight,
                 defaultValue = 128
             )
-            uploadPlane(
+            val vUpload = uploadPlane(
                 index = 2,
                 plane = image.planes[2],
                 width = chromaWidth,
@@ -130,6 +134,12 @@ object StillCaptureGlPipeline {
                 defaultValue = 128
             )
             val uploadFinishedNanos = SystemClock.elapsedRealtimeNanos()
+            val planePackNanos =
+                yUpload.packNanos + uUpload.packNanos + vUpload.packNanos
+            val textureUploadNanos =
+                yUpload.textureUploadNanos +
+                    uUpload.textureUploadNanos +
+                    vUpload.textureUploadNanos
 
             val targetSetupStartedNanos = SystemClock.elapsedRealtimeNanos()
             ensureOutputTarget(geometry.outputWidth, geometry.outputHeight)
@@ -209,23 +219,29 @@ object StillCaptureGlPipeline {
             releaseCurrent()
             Log.i(
                 CAPTURE_PERF_TAG,
-                "stage=gpu_complete " +
+                "capture=$captureId stage=gpu_complete " +
                     "totalMs=${elapsedMillis(totalStartedNanos, readbackFinishedNanos)} " +
                     "initMs=${elapsedMillis(initializationStartedNanos, initializationFinishedNanos)} " +
-                    "uploadMs=${elapsedMillis(uploadStartedNanos, uploadFinishedNanos)} " +
+                    "uploadTotalMs=${elapsedMillis(uploadStartedNanos, uploadFinishedNanos)} " +
+                    "planePackMs=${nanosToMillis(planePackNanos)} " +
+                    "textureUploadMs=${nanosToMillis(textureUploadNanos)} " +
                     "targetMs=${elapsedMillis(targetSetupStartedNanos, targetSetupFinishedNanos)} " +
                     "drawSubmitMs=${elapsedMillis(drawStartedNanos, drawSubmittedNanos)} " +
                     "readbackMs=${elapsedMillis(readbackStartedNanos, readbackFinishedNanos)} " +
                     "output=${geometry.outputWidth}x${geometry.outputHeight} " +
                     "denoise=${configuredDenoiseMode.resolveForIso(iso).storageValue} " +
-                    "lut=${lut != null}"
+                    "lut=${lut != null} " +
+                    "planes=y:${image.planes[0].rowStride}/${image.planes[0].pixelStride}," +
+                    "u:${image.planes[1].rowStride}/${image.planes[1].pixelStride}," +
+                    "v:${image.planes[2].rowStride}/${image.planes[2].pixelStride}"
             )
             bitmap
         } catch (error: Exception) {
             Log.w(TAG, "Merged photo pipeline failed; using legacy Bitmap path", error)
             Log.w(
                 CAPTURE_PERF_TAG,
-                "stage=gpu_fallback reason=${error.javaClass.simpleName} " +
+                "capture=$captureId stage=gpu_fallback " +
+                    "reason=${error.javaClass.simpleName} " +
                     "durationMs=${elapsedMillis(totalStartedNanos)}"
             )
             releaseInternal()
@@ -245,9 +261,12 @@ object StillCaptureGlPipeline {
         width: Int,
         height: Int,
         defaultValue: Int
-    ) {
+    ): PlaneUploadTiming {
+        val packStartedNanos = SystemClock.elapsedRealtimeNanos()
         val packed = packPlane(index, plane, width, height, defaultValue.toByte())
+        val packFinishedNanos = SystemClock.elapsedRealtimeNanos()
 
+        val textureUploadStartedNanos = SystemClock.elapsedRealtimeNanos()
         if (planeTextureIds[index] == 0) {
             planeTextureIds[index] = createTexture2d()
         }
@@ -284,6 +303,11 @@ object StillCaptureGlPipeline {
         }
         GLES30.glPixelStorei(GLES30.GL_UNPACK_ALIGNMENT, 4)
         checkGlError("upload YUV plane $index")
+        val textureUploadFinishedNanos = SystemClock.elapsedRealtimeNanos()
+        return PlaneUploadTiming(
+            packNanos = packFinishedNanos - packStartedNanos,
+            textureUploadNanos = textureUploadFinishedNanos - textureUploadStartedNanos
+        )
     }
 
     private fun packPlane(
@@ -308,25 +332,62 @@ object StillCaptureGlPipeline {
         val rowStride = plane.rowStride
         val pixelStride = plane.pixelStride
 
-        if (pixelStride == 1 && rowStride == width && start + requiredCapacity <= limit) {
-            val contiguous = source.duplicate()
-            contiguous.position(start)
-            contiguous.limit(start + requiredCapacity)
-            output.put(contiguous)
+        if (pixelStride == 1) {
+            if (rowStride == width && start + requiredCapacity <= limit) {
+                val contiguous = source.duplicate()
+                contiguous.position(start)
+                contiguous.limit(start + requiredCapacity)
+                output.put(contiguous)
+            } else {
+                for (row in 0 until height) {
+                    val rowStart = start + row * rowStride
+                    val available = (limit - rowStart).coerceAtLeast(0)
+                    val bytesToCopy = minOf(width, available)
+                    if (bytesToCopy > 0) {
+                        val rowView = source.duplicate()
+                        rowView.position(rowStart)
+                        rowView.limit(rowStart + bytesToCopy)
+                        output.put(rowView)
+                    }
+                    repeat(width - bytesToCopy) {
+                        output.put(defaultValue)
+                    }
+                }
+            }
         } else {
+            var packedArray = packedPlaneArrays[index]
+            if (packedArray == null || packedArray.size < requiredCapacity) {
+                packedArray = ByteArray(requiredCapacity)
+                packedPlaneArrays[index] = packedArray
+            }
+            var rowArray = planeRowArrays[index]
+            if (rowArray == null || rowArray.size < rowStride) {
+                rowArray = ByteArray(rowStride)
+                planeRowArrays[index] = rowArray
+            }
+
             for (row in 0 until height) {
                 val rowStart = start + row * rowStride
+                val available = (limit - rowStart).coerceAtLeast(0)
+                val bytesToCopy = minOf(rowStride, available)
+                if (bytesToCopy > 0) {
+                    val rowView = source.duplicate()
+                    rowView.position(rowStart)
+                    rowView.limit(rowStart + bytesToCopy)
+                    rowView.get(rowArray, 0, bytesToCopy)
+                }
+                val outputRowStart = row * width
                 for (column in 0 until width) {
-                    val sourceIndex = rowStart + column * pixelStride
-                    output.put(
-                        if (sourceIndex in start until limit) {
-                            source.get(sourceIndex)
+                    val sourceIndex = column * pixelStride
+                    packedArray[outputRowStart + column] =
+                        if (sourceIndex < bytesToCopy) {
+                            rowArray[sourceIndex]
                         } else {
                             defaultValue
                         }
-                    )
                 }
             }
+            output.put(packedArray, 0, requiredCapacity)
         }
         output.flip()
         return output
@@ -638,6 +699,14 @@ object StillCaptureGlPipeline {
         )
     }
 
+    private fun nanosToMillis(nanos: Long): String {
+        return String.format(
+            java.util.Locale.US,
+            "%.2f",
+            nanos / 1_000_000.0
+        )
+    }
+
     @Synchronized
     fun release() {
         releaseInternal()
@@ -689,7 +758,14 @@ object StillCaptureGlPipeline {
         boundLut = null
         readBuffer = null
         packedPlaneBuffers.fill(null)
+        packedPlaneArrays.fill(null)
+        planeRowArrays.fill(null)
     }
+
+    private data class PlaneUploadTiming(
+        val packNanos: Long,
+        val textureUploadNanos: Long
+    )
 
     private data class DenoiseParameters(
         val radius: Int,

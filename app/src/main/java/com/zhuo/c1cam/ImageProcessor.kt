@@ -22,6 +22,21 @@ import kotlin.math.roundToInt
 
 class ImageProcessor(private val context: Context) {
 
+    class ProcessedCapture internal constructor(
+        internal val captureId: Long,
+        internal val bitmap: Bitmap,
+        internal val outputFormat: ImageOutputFormat,
+        internal val jpegQuality: Int,
+        internal val metadata: CaptureMetadata,
+        internal val processingPath: String,
+        internal val processingStartedNanos: Long,
+        internal val pixelsReadyNanos: Long
+    ) {
+        fun recycle() {
+            if (!bitmap.isRecycled) bitmap.recycle()
+        }
+    }
+
     // Reusable bitmaps for preview to reduce GC pressure
     private var reusedUprightBitmap: Bitmap? = null
     private var reusedRectifiedBitmap: Bitmap? = null
@@ -35,7 +50,8 @@ class ImageProcessor(private val context: Context) {
     private val matrix = Matrix()
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { isFilterBitmap = true }
 
-    fun processAndSaveImage(
+    fun processCapturedImage(
+        captureId: Long,
         imageProxy: ImageProxy,
         normalizedViewPoints: List<PointF>,
         viewW: Int,
@@ -50,7 +66,7 @@ class ImageProcessor(private val context: Context) {
         jpegQuality: Int,
         captureMetadata: CaptureMetadata,
         savedImageRotationDegrees: Int
-    ): Boolean {
+    ): ProcessedCapture {
         val processingStartedNanos = SystemClock.elapsedRealtimeNanos()
         val rotationDegrees = imageProxy.imageInfo.rotationDegrees
         var processingPath = "gpu"
@@ -69,6 +85,7 @@ class ImageProcessor(private val context: Context) {
                 savedImageRotationDegrees = savedImageRotationDegrees
             )
             StillCaptureGlPipeline.process(
+                captureId = captureId,
                 image = imageProxy,
                 geometry = geometry,
                 lut = currentLut,
@@ -77,6 +94,7 @@ class ImageProcessor(private val context: Context) {
             ) ?: run {
                 processingPath = "cpu_fallback"
                 processStillCaptureLegacy(
+                    captureId = captureId,
                     imageProxy = imageProxy,
                     normalizedViewPoints = normalizedViewPoints,
                     viewW = viewW,
@@ -96,6 +114,7 @@ class ImageProcessor(private val context: Context) {
             processingPath = "cpu_fallback"
             Log.e("ImageProcessor", "Merged capture pipeline failed", error)
             processStillCaptureLegacy(
+                captureId = captureId,
                 imageProxy = imageProxy,
                 normalizedViewPoints = normalizedViewPoints,
                 viewW = viewW,
@@ -115,25 +134,51 @@ class ImageProcessor(private val context: Context) {
         }
 
         val pixelsReadyNanos = SystemClock.elapsedRealtimeNanos()
-        val saved = saveBitmapToGallery(
-            bitmapToSave,
-            outputFormat,
-            JpegQuality.sanitize(jpegQuality),
-            captureMetadata
+        return ProcessedCapture(
+            captureId = captureId,
+            bitmap = bitmapToSave,
+            outputFormat = outputFormat,
+            jpegQuality = JpegQuality.sanitize(jpegQuality),
+            metadata = captureMetadata,
+            processingPath = processingPath,
+            processingStartedNanos = processingStartedNanos,
+            pixelsReadyNanos = pixelsReadyNanos
         )
-        Log.i(
-            CAPTURE_PERF_TAG,
-            "stage=complete path=$processingPath success=$saved " +
-                "pixelsMs=${elapsedMillis(processingStartedNanos, pixelsReadyNanos)} " +
-                "saveMs=${elapsedMillis(pixelsReadyNanos)} " +
-                "totalMs=${elapsedMillis(processingStartedNanos)} " +
-                "output=${bitmapToSave.width}x${bitmapToSave.height} " +
-                "format=${outputFormat.name} jpegQuality=$jpegQuality"
-        )
-        return saved
+    }
+
+    fun saveProcessedImage(capture: ProcessedCapture): Boolean {
+        val outputWidth = capture.bitmap.width
+        val outputHeight = capture.bitmap.height
+        return try {
+            val saved = saveBitmapToGallery(
+                capture.captureId,
+                capture.bitmap,
+                capture.outputFormat,
+                capture.jpegQuality,
+                capture.metadata
+            )
+            Log.i(
+                CAPTURE_PERF_TAG,
+                "capture=${capture.captureId} stage=complete " +
+                    "path=${capture.processingPath} success=$saved " +
+                    "pixelsMs=${elapsedMillis(
+                        capture.processingStartedNanos,
+                        capture.pixelsReadyNanos
+                    )} " +
+                    "saveMs=${elapsedMillis(capture.pixelsReadyNanos)} " +
+                    "totalMs=${elapsedMillis(capture.processingStartedNanos)} " +
+                    "output=${outputWidth}x$outputHeight " +
+                    "format=${capture.outputFormat.name} " +
+                    "jpegQuality=${capture.jpegQuality}"
+            )
+            saved
+        } finally {
+            capture.recycle()
+        }
     }
 
     private fun processStillCaptureLegacy(
+        captureId: Long,
         imageProxy: ImageProxy,
         normalizedViewPoints: List<PointF>,
         viewW: Int,
@@ -193,7 +238,8 @@ class ImageProcessor(private val context: Context) {
         return rotateBitmap(finalBitmap, savedImageRotationDegrees).also {
             Log.i(
                 CAPTURE_PERF_TAG,
-                "stage=cpu_fallback_complete durationMs=${elapsedMillis(startedNanos)} " +
+                "capture=$captureId stage=cpu_fallback_complete " +
+                    "durationMs=${elapsedMillis(startedNanos)} " +
                     "output=${it.width}x${it.height}"
             )
         }
@@ -417,6 +463,7 @@ class ImageProcessor(private val context: Context) {
     }
 
     private fun saveBitmapToGallery(
+        captureId: Long,
         bitmap: Bitmap,
         outputFormat: ImageOutputFormat,
         jpegQuality: Int,
@@ -461,7 +508,8 @@ class ImageProcessor(private val context: Context) {
             }
             Log.i(
                 CAPTURE_PERF_TAG,
-                "stage=compress durationMs=${elapsedMillis(compressionStartedNanos)} " +
+                "capture=$captureId stage=compress " +
+                    "durationMs=${elapsedMillis(compressionStartedNanos)} " +
                     "format=${outputFormat.name} quality=" +
                     if (outputFormat == ImageOutputFormat.JPEG) jpegQuality else 100
             )
@@ -471,7 +519,8 @@ class ImageProcessor(private val context: Context) {
                 writeJpegExif(outputUri, bitmap, metadata)
                 Log.i(
                     CAPTURE_PERF_TAG,
-                    "stage=exif durationMs=${elapsedMillis(exifStartedNanos)}"
+                    "capture=$captureId stage=exif " +
+                        "durationMs=${elapsedMillis(exifStartedNanos)}"
                 )
             }
             savedSuccessfully = true
@@ -493,7 +542,7 @@ class ImageProcessor(private val context: Context) {
         }
         Log.i(
             CAPTURE_PERF_TAG,
-            "stage=gallery_write success=$savedSuccessfully " +
+            "capture=$captureId stage=gallery_write success=$savedSuccessfully " +
                 "durationMs=${elapsedMillis(saveStartedNanos)}"
         )
         return savedSuccessfully
