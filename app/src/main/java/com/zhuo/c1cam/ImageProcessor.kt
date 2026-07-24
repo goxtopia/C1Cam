@@ -46,7 +46,8 @@ class ImageProcessor(private val context: Context) {
         focalLength: Int,
         noCropAspectRatio: Float,
         outputFormat: ImageOutputFormat,
-        captureMetadata: CaptureMetadata
+        captureMetadata: CaptureMetadata,
+        savedImageRotationDegrees: Int
     ): Boolean {
         val rotationDegrees = imageProxy.imageInfo.rotationDegrees
 
@@ -95,8 +96,26 @@ class ImageProcessor(private val context: Context) {
             } ?: rectifiedBitmap
         }
 
-        // Save
-        return saveBitmapToGallery(finalBitmap, outputFormat, captureMetadata)
+        val bitmapToSave = rotateBitmap(finalBitmap, savedImageRotationDegrees)
+        return saveBitmapToGallery(bitmapToSave, outputFormat, captureMetadata)
+    }
+
+    private fun rotateBitmap(bitmap: Bitmap, rotationDegrees: Int): Bitmap {
+        val normalizedRotation = ((rotationDegrees % 360) + 360) % 360
+        if (normalizedRotation == 0) return bitmap
+
+        val rotationMatrix = Matrix().apply {
+            postRotate(normalizedRotation.toFloat())
+        }
+        return Bitmap.createBitmap(
+            bitmap,
+            0,
+            0,
+            bitmap.width,
+            bitmap.height,
+            rotationMatrix,
+            true
+        )
     }
 
     fun processForPreview(

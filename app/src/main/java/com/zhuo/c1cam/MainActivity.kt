@@ -47,6 +47,11 @@ class MainActivity : AppCompatActivity() {
 
     private var isFullscreen = false
     private var isRectifiedMain = false
+    private var hasDeviceRotationSample = false
+    @Volatile
+    private var latestDeviceRotation = Surface.ROTATION_0
+    @Volatile
+    private var latestDisplayRotation = Surface.ROTATION_0
 
     private lateinit var appSettings: AppSettings
     private lateinit var imageProcessor: ImageProcessor
@@ -131,6 +136,12 @@ class MainActivity : AppCompatActivity() {
             appSettings = appSettings,
             imageProcessor = imageProcessor,
             lutProvider = { currentLut },
+            savedImageRotationDegreesProvider = {
+                OrientationMath.savedImageRotationDegrees(
+                    deviceRotation = latestDeviceRotation,
+                    displayRotation = latestDisplayRotation
+                )
+            },
             onPreviewSourceAspectRatioChanged = { updateCropFrameGuideUi() }
         )
         orientationAwareControls = listOf<View>(
@@ -146,6 +157,8 @@ class MainActivity : AppCompatActivity() {
         )
         deviceOrientationManager = DeviceOrientationManager(this) { rotation ->
             runOnUiThread {
+                latestDeviceRotation = rotation
+                hasDeviceRotationSample = true
                 // Physical device orientation is only used to keep the controls upright.
                 // CameraX must follow the app display orientation; otherwise a landscape
                 // grip can rotate the crop/LUT while the activity itself is still portrait.
@@ -491,6 +504,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
+        hasDeviceRotationSample = false
         syncOrientationFromDisplay()
         deviceOrientationManager.start()
     }
@@ -505,6 +519,10 @@ class MainActivity : AppCompatActivity() {
     private fun syncOrientationFromDisplay() {
         val displayRotation = viewFinder.display?.rotation
             ?: windowManager.defaultDisplay.rotation
+        latestDisplayRotation = displayRotation
+        if (!hasDeviceRotationSample) {
+            latestDeviceRotation = displayRotation
+        }
         cameraManager.updateTargetRotation(displayRotation)
         rotateControlsToRemainUpright(displayRotation)
         viewFinder.post { updateCropFrameGuideUi() }
@@ -512,10 +530,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun rotateControlsToRemainUpright(deviceRotation: Int) {
         val displayRotation = viewFinder.display?.rotation ?: Surface.ROTATION_0
-        val relativeDegrees = normalizeRotationDegrees(
-            surfaceRotationDegrees(deviceRotation) - surfaceRotationDegrees(displayRotation)
-        )
-        val controlRotation = relativeDegrees.toFloat()
+        val controlRotation = OrientationMath.controlRotationDegrees(
+            deviceRotation = deviceRotation,
+            displayRotation = displayRotation
+        ).toFloat()
 
         orientationAwareControls.forEach { view ->
             view.animate()
@@ -523,19 +541,6 @@ class MainActivity : AppCompatActivity() {
                 .setDuration(ORIENTATION_ANIMATION_DURATION_MS)
                 .start()
         }
-    }
-
-    private fun surfaceRotationDegrees(rotation: Int): Int {
-        return when (rotation) {
-            Surface.ROTATION_90 -> 90
-            Surface.ROTATION_180 -> 180
-            Surface.ROTATION_270 -> 270
-            else -> 0
-        }
-    }
-
-    private fun normalizeRotationDegrees(degrees: Int): Int {
-        return ((degrees + 540) % 360) - 180
     }
 
     private fun toggleFullscreen() {

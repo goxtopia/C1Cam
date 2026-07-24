@@ -50,6 +50,7 @@ class CameraManager(
     private val appSettings: AppSettings,
     private val imageProcessor: ImageProcessor,
     private val lutProvider: () -> Lut3D?,
+    private val savedImageRotationDegreesProvider: () -> Int,
     private val onPreviewSourceAspectRatioChanged: () -> Unit
 ) {
 
@@ -193,6 +194,9 @@ class CameraManager(
         val lut = lutProvider()
         val captureStartedAt = System.currentTimeMillis()
         val outputFormat = appSettings.imageOutputFormat
+        // Freeze orientation at shutter press; sensor changes during processing must not
+        // alter the direction of the photo being saved.
+        val savedImageRotationDegrees = savedImageRotationDegreesProvider()
         latestStillCaptureMetadata = null
 
         capture.takePicture(
@@ -233,7 +237,8 @@ class CameraManager(
                         appSettings.focalLength,
                         appSettings.noCropAspectRatio,
                         outputFormat,
-                        captureMetadata
+                        captureMetadata,
+                        savedImageRotationDegrees
                     )
                     activity.runOnUiThread {
                         Toast.makeText(
