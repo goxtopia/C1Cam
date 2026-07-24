@@ -7,6 +7,7 @@ import android.hardware.camera2.CameraMetadata
 import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.CaptureResult
 import android.hardware.camera2.TotalCaptureResult
+import android.os.SystemClock
 import android.util.Log
 import android.util.Size
 import android.view.Surface
@@ -193,7 +194,9 @@ class CameraManager(
         val ratio = appSettings.targetAspectRatio
         val lut = lutProvider()
         val captureStartedAt = System.currentTimeMillis()
+        val captureStartedElapsedNanos = SystemClock.elapsedRealtimeNanos()
         val outputFormat = appSettings.imageOutputFormat
+        val jpegQuality = appSettings.jpegQuality
         // Freeze orientation at shutter press; sensor changes during processing must not
         // alter the direction of the photo being saved.
         val savedImageRotationDegrees = savedImageRotationDegreesProvider()
@@ -210,6 +213,12 @@ class CameraManager(
                 }
 
                 override fun onCaptureSuccess(image: ImageProxy) {
+                    Log.i(
+                        CAPTURE_PERF_TAG,
+                        "stage=image_received latencyMs=${elapsedMillis(captureStartedElapsedNanos)} " +
+                            "size=${image.width}x${image.height} " +
+                            "rotation=${image.imageInfo.rotationDegrees}"
+                    )
                     val captureMetadata = (latestStillCaptureMetadata ?: latestCaptureMetadata)?.copy(
                         capturedAtMillis = captureStartedAt,
                         equivalentFocalLengthMm = appSettings.focalLength,
@@ -237,6 +246,7 @@ class CameraManager(
                         appSettings.focalLength,
                         appSettings.noCropAspectRatio,
                         outputFormat,
+                        jpegQuality,
                         captureMetadata,
                         savedImageRotationDegrees
                     )
@@ -651,6 +661,19 @@ class CameraManager(
             cameraExecutor.shutdownNow()
             Thread.currentThread().interrupt()
         }
+        imageProcessor.shutdown()
         GlRectificationUtils.release()
+    }
+
+    private fun elapsedMillis(startNanos: Long): String {
+        return String.format(
+            java.util.Locale.US,
+            "%.2f",
+            (SystemClock.elapsedRealtimeNanos() - startNanos) / 1_000_000.0
+        )
+    }
+
+    companion object {
+        private const val CAPTURE_PERF_TAG = "C1CapturePerf"
     }
 }

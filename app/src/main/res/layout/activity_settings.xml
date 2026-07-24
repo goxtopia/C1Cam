@@ -268,30 +268,65 @@
                     style="@style/C1_SettingsCard">
 
                     <LinearLayout
-                        android:id="@+id/output_format_row"
-                        style="@style/C1_SettingsRow">
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical">
 
                         <LinearLayout
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:orientation="vertical">
+                            android:id="@+id/output_format_row"
+                            style="@style/C1_SettingsRow">
+
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:orientation="vertical">
+
+                                <TextView
+                                    style="@style/C1_SettingsTitle"
+                                    android:text="File format" />
+
+                                <TextView
+                                    style="@style/C1_SettingsSubtitle"
+                                    android:text="JPEG includes capture metadata" />
+                            </LinearLayout>
 
                             <TextView
-                                style="@style/C1_SettingsTitle"
-                                android:text="File format" />
+                                android:id="@+id/output_format_value"
+                                style="@style/C1_SettingsValue"
+                                tools:text="JPEG" />
 
-                            <TextView
-                                style="@style/C1_SettingsSubtitle"
-                                android:text="JPEG includes capture metadata" />
+                            <ImageView style="@style/C1_SettingsChevron" />
                         </LinearLayout>
 
-                        <TextView
-                            android:id="@+id/output_format_value"
-                            style="@style/C1_SettingsValue"
-                            tools:text="JPEG" />
+                        <View style="@style/C1_SettingsDivider" />
 
-                        <ImageView style="@style/C1_SettingsChevron" />
+                        <LinearLayout
+                            android:id="@+id/jpeg_quality_row"
+                            style="@style/C1_SettingsRow">
+
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:orientation="vertical">
+
+                                <TextView
+                                    style="@style/C1_SettingsTitle"
+                                    android:text="JPEG quality" />
+
+                                <TextView
+                                    style="@style/C1_SettingsSubtitle"
+                                    android:text="Used when the file format is JPEG" />
+                            </LinearLayout>
+
+                            <TextView
+                                android:id="@+id/jpeg_quality_value"
+                                style="@style/C1_SettingsValue"
+                                tools:text="95" />
+
+                            <ImageView style="@style/C1_SettingsChevron" />
+                        </LinearLayout>
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
 

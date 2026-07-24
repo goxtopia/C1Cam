@@ -36,6 +36,7 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var noCropRatioValue: TextView
     private lateinit var lutValue: TextView
     private lateinit var outputFormatValue: TextView
+    private lateinit var jpegQualityValue: TextView
     private lateinit var chromaDenoiseValue: TextView
 
     private var selectionMode: SelectionMode? = null
@@ -72,6 +73,7 @@ class SettingsActivity : AppCompatActivity() {
         noCropRatioValue = findViewById(R.id.no_crop_ratio_value)
         lutValue = findViewById(R.id.lut_value)
         outputFormatValue = findViewById(R.id.output_format_value)
+        jpegQualityValue = findViewById(R.id.jpeg_quality_value)
         chromaDenoiseValue = findViewById(R.id.chroma_denoise_value)
 
         findViewById<View>(R.id.settings_back).setOnClickListener { finish() }
@@ -90,6 +92,9 @@ class SettingsActivity : AppCompatActivity() {
         }
         findViewById<View>(R.id.output_format_row).setOnClickListener {
             openSelectionPage(SelectionMode.OUTPUT_FORMAT)
+        }
+        findViewById<View>(R.id.jpeg_quality_row).setOnClickListener {
+            openSelectionPage(SelectionMode.JPEG_QUALITY)
         }
         findViewById<View>(R.id.chroma_denoise_row).setOnClickListener {
             openSelectionPage(SelectionMode.CHROMA_DENOISE)
@@ -164,6 +169,7 @@ class SettingsActivity : AppCompatActivity() {
             SelectionMode.NO_CROP_RATIO -> noCropRatioChoices()
             SelectionMode.LUT -> lutChoices()
             SelectionMode.OUTPUT_FORMAT -> outputFormatChoices()
+            SelectionMode.JPEG_QUALITY -> jpegQualityChoices()
             SelectionMode.CHROMA_DENOISE -> chromaDenoiseChoices()
         }
 
@@ -173,6 +179,7 @@ class SettingsActivity : AppCompatActivity() {
             SelectionMode.NO_CROP_RATIO -> "No-crop framing ratio"
             SelectionMode.LUT -> "Color profile"
             SelectionMode.OUTPUT_FORMAT -> "File format"
+            SelectionMode.JPEG_QUALITY -> "JPEG quality"
             SelectionMode.CHROMA_DENOISE -> "Chroma noise reduction"
         }
         selectionHint.text = when (mode) {
@@ -181,6 +188,7 @@ class SettingsActivity : AppCompatActivity() {
             SelectionMode.NO_CROP_RATIO -> "Choose the guide shown when crop mode is disabled."
             SelectionMode.LUT -> "Choose a look. The live preview updates after returning to the camera."
             SelectionMode.OUTPUT_FORMAT -> "JPEG stores capture metadata. PNG preserves pixels losslessly."
+            SelectionMode.JPEG_QUALITY -> "Higher quality produces larger JPEG files and takes longer to encode."
             SelectionMode.CHROMA_DENOISE -> "Auto selects strength from the ISO recorded for each capture."
         }
 
@@ -223,6 +231,10 @@ class SettingsActivity : AppCompatActivity() {
 
             SelectionMode.OUTPUT_FORMAT -> {
                 appSettings.imageOutputFormat = choice.outputFormat ?: return
+            }
+
+            SelectionMode.JPEG_QUALITY -> {
+                appSettings.jpegQuality = choice.intValue ?: return
             }
 
             SelectionMode.CHROMA_DENOISE -> {
@@ -355,6 +367,16 @@ class SettingsActivity : AppCompatActivity() {
         )
     }
 
+    private fun jpegQualityChoices(): List<Choice> {
+        return JpegQuality.choices.map { quality ->
+            Choice(
+                label = "$quality${if (quality == JpegQuality.DEFAULT) " · Recommended" else ""}",
+                intValue = quality,
+                selected = appSettings.jpegQuality == quality
+            )
+        }
+    }
+
     private fun chromaDenoiseChoices(): List<Choice> {
         return listOf(
             Choice(
@@ -391,6 +413,7 @@ class SettingsActivity : AppCompatActivity() {
         noCropRatioValue.text = noCropRatioLabel(appSettings.noCropAspectRatio)
         lutValue.text = lutLabel(appSettings.lutName)
         outputFormatValue.text = appSettings.imageOutputFormat.name
+        jpegQualityValue.text = appSettings.jpegQuality.toString()
         chromaDenoiseValue.text = appSettings.chromaDenoiseMode.displayName
     }
 
@@ -533,6 +556,7 @@ class SettingsActivity : AppCompatActivity() {
         NO_CROP_RATIO,
         LUT,
         OUTPUT_FORMAT,
+        JPEG_QUALITY,
         CHROMA_DENOISE
     }
 

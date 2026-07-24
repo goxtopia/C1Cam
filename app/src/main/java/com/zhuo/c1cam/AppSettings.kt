@@ -26,6 +26,7 @@ class AppSettings(private val context: Context) {
     var previewDisplayMode: PreviewDisplayMode = PreviewDisplayMode.CAMERA
     var isCropFrameGuideVisible: Boolean = false
     var imageOutputFormat: ImageOutputFormat = ImageOutputFormat.JPEG
+    var jpegQuality: Int = JpegQuality.DEFAULT
     var savedPoints: List<PointF>? = null
 
     init {
@@ -61,6 +62,9 @@ class AppSettings(private val context: Context) {
         isCropFrameGuideVisible = prefs.getBoolean(KEY_CROP_FRAME_GUIDE_VISIBLE, false)
         imageOutputFormat = ImageOutputFormat.fromStorageValue(
             prefs.getString(KEY_IMAGE_OUTPUT_FORMAT, ImageOutputFormat.JPEG.storageValue)
+        )
+        jpegQuality = JpegQuality.sanitize(
+            prefs.getInt(KEY_JPEG_QUALITY, JpegQuality.DEFAULT)
         )
 
         val pointsStr = prefs.getString(KEY_POINTS, null)
@@ -101,6 +105,7 @@ class AppSettings(private val context: Context) {
         editor.putString(KEY_PREVIEW_DISPLAY_MODE, previewDisplayMode.storageValue)
         editor.putBoolean(KEY_CROP_FRAME_GUIDE_VISIBLE, isCropFrameGuideVisible)
         editor.putString(KEY_IMAGE_OUTPUT_FORMAT, imageOutputFormat.storageValue)
+        editor.putInt(KEY_JPEG_QUALITY, jpegQuality)
 
         if (currentPoints.size == 4) {
             val sb = StringBuilder()
@@ -137,5 +142,6 @@ class AppSettings(private val context: Context) {
         private const val KEY_PREVIEW_DISPLAY_MODE = "preview_display_mode"
         private const val KEY_CROP_FRAME_GUIDE_VISIBLE = "crop_frame_guide_visible"
         private const val KEY_IMAGE_OUTPUT_FORMAT = "image_output_format"
+        private const val KEY_JPEG_QUALITY = "jpeg_quality"
     }
 }

@@ -9,6 +9,7 @@ import android.graphics.Paint
 import android.graphics.PointF
 import android.net.Uri
 import android.os.Build
+import android.os.SystemClock
 import android.provider.MediaStore
 import android.util.Log
 import androidx.camera.core.ImageProxy
@@ -46,12 +47,108 @@ class ImageProcessor(private val context: Context) {
         focalLength: Int,
         noCropAspectRatio: Float,
         outputFormat: ImageOutputFormat,
+        jpegQuality: Int,
         captureMetadata: CaptureMetadata,
         savedImageRotationDegrees: Int
     ): Boolean {
+        val processingStartedNanos = SystemClock.elapsedRealtimeNanos()
         val rotationDegrees = imageProxy.imageInfo.rotationDegrees
+        var processingPath = "gpu"
+        val bitmapToSave = try {
+            val geometry = StillCaptureGeometry.create(
+                rawWidth = imageProxy.width,
+                rawHeight = imageProxy.height,
+                imageRotationDegrees = rotationDegrees,
+                normalizedViewPoints = normalizedViewPoints,
+                viewWidth = viewW,
+                viewHeight = viewH,
+                targetAspectRatio = targetAspectRatio,
+                isCropModeOff = isCropModeOff,
+                focalLength = focalLength,
+                noCropAspectRatio = noCropAspectRatio,
+                savedImageRotationDegrees = savedImageRotationDegrees
+            )
+            StillCaptureGlPipeline.process(
+                image = imageProxy,
+                geometry = geometry,
+                lut = currentLut,
+                configuredDenoiseMode = chromaDenoiseMode,
+                iso = captureMetadata.iso
+            ) ?: run {
+                processingPath = "cpu_fallback"
+                processStillCaptureLegacy(
+                    imageProxy = imageProxy,
+                    normalizedViewPoints = normalizedViewPoints,
+                    viewW = viewW,
+                    viewH = viewH,
+                    targetAspectRatio = targetAspectRatio,
+                    currentLut = currentLut,
+                    chromaDenoiseMode = chromaDenoiseMode,
+                    isCropModeOff = isCropModeOff,
+                    focalLength = focalLength,
+                    noCropAspectRatio = noCropAspectRatio,
+                    captureMetadata = captureMetadata,
+                    rotationDegrees = rotationDegrees,
+                    savedImageRotationDegrees = savedImageRotationDegrees
+                )
+            }
+        } catch (error: Exception) {
+            processingPath = "cpu_fallback"
+            Log.e("ImageProcessor", "Merged capture pipeline failed", error)
+            processStillCaptureLegacy(
+                imageProxy = imageProxy,
+                normalizedViewPoints = normalizedViewPoints,
+                viewW = viewW,
+                viewH = viewH,
+                targetAspectRatio = targetAspectRatio,
+                currentLut = currentLut,
+                chromaDenoiseMode = chromaDenoiseMode,
+                isCropModeOff = isCropModeOff,
+                focalLength = focalLength,
+                noCropAspectRatio = noCropAspectRatio,
+                captureMetadata = captureMetadata,
+                rotationDegrees = rotationDegrees,
+                savedImageRotationDegrees = savedImageRotationDegrees
+            )
+        } finally {
+            imageProxy.close()
+        }
 
-        // Convert to Bitmap, applying Chroma Noise Reduction if enabled
+        val pixelsReadyNanos = SystemClock.elapsedRealtimeNanos()
+        val saved = saveBitmapToGallery(
+            bitmapToSave,
+            outputFormat,
+            JpegQuality.sanitize(jpegQuality),
+            captureMetadata
+        )
+        Log.i(
+            CAPTURE_PERF_TAG,
+            "stage=complete path=$processingPath success=$saved " +
+                "pixelsMs=${elapsedMillis(processingStartedNanos, pixelsReadyNanos)} " +
+                "saveMs=${elapsedMillis(pixelsReadyNanos)} " +
+                "totalMs=${elapsedMillis(processingStartedNanos)} " +
+                "output=${bitmapToSave.width}x${bitmapToSave.height} " +
+                "format=${outputFormat.name} jpegQuality=$jpegQuality"
+        )
+        return saved
+    }
+
+    private fun processStillCaptureLegacy(
+        imageProxy: ImageProxy,
+        normalizedViewPoints: List<PointF>,
+        viewW: Int,
+        viewH: Int,
+        targetAspectRatio: Float,
+        currentLut: Lut3D?,
+        chromaDenoiseMode: ChromaDenoiseMode,
+        isCropModeOff: Boolean,
+        focalLength: Int,
+        noCropAspectRatio: Float,
+        captureMetadata: CaptureMetadata,
+        rotationDegrees: Int,
+        savedImageRotationDegrees: Int
+    ): Bitmap {
+        val startedNanos = SystemClock.elapsedRealtimeNanos()
         val bitmap = try {
             if (chromaDenoiseMode != ChromaDenoiseMode.OFF) {
                 ChromaNoiseReduction.process(
@@ -62,14 +159,11 @@ class ImageProcessor(private val context: Context) {
             } else {
                 imageProxy.toBitmap()
             }
-        } catch (e: Exception) {
-            Log.e("ImageProcessor", "Error during image processing", e)
+        } catch (error: Exception) {
+            Log.e("ImageProcessor", "Legacy image conversion failed", error)
             imageProxy.toBitmap()
-        } finally {
-            imageProxy.close()
         }
 
-        // Rotate to upright
         val uprightBitmap = if (rotationDegrees != 0) {
             val m = Matrix()
             m.postRotate(rotationDegrees.toFloat())
@@ -96,8 +190,13 @@ class ImageProcessor(private val context: Context) {
             } ?: rectifiedBitmap
         }
 
-        val bitmapToSave = rotateBitmap(finalBitmap, savedImageRotationDegrees)
-        return saveBitmapToGallery(bitmapToSave, outputFormat, captureMetadata)
+        return rotateBitmap(finalBitmap, savedImageRotationDegrees).also {
+            Log.i(
+                CAPTURE_PERF_TAG,
+                "stage=cpu_fallback_complete durationMs=${elapsedMillis(startedNanos)} " +
+                    "output=${it.width}x${it.height}"
+            )
+        }
     }
 
     private fun rotateBitmap(bitmap: Bitmap, rotationDegrees: Int): Bitmap {
@@ -116,6 +215,10 @@ class ImageProcessor(private val context: Context) {
             rotationMatrix,
             true
         )
+    }
+
+    fun shutdown() {
+        StillCaptureGlPipeline.release()
     }
 
     fun processForPreview(
@@ -316,8 +419,10 @@ class ImageProcessor(private val context: Context) {
     private fun saveBitmapToGallery(
         bitmap: Bitmap,
         outputFormat: ImageOutputFormat,
+        jpegQuality: Int,
         metadata: CaptureMetadata
     ): Boolean {
+        val saveStartedNanos = SystemClock.elapsedRealtimeNanos()
         val timestamp = Date(metadata.capturedAtMillis)
         val baseName = SimpleDateFormat(FILENAME_FORMAT, Locale.US).format(timestamp)
         val name = "$baseName.${outputFormat.extension}"
@@ -339,18 +444,35 @@ class ImageProcessor(private val context: Context) {
         try {
             val outputStream = contentResolver.openOutputStream(outputUri, "w")
                 ?: error("Unable to open gallery output stream")
+            val compressionStartedNanos = SystemClock.elapsedRealtimeNanos()
             outputStream.use {
                 val compressFormat = when (outputFormat) {
                     ImageOutputFormat.JPEG -> Bitmap.CompressFormat.JPEG
                     ImageOutputFormat.PNG -> Bitmap.CompressFormat.PNG
                 }
-                if (!bitmap.compress(compressFormat, JPEG_QUALITY, it)) {
+                if (!bitmap.compress(
+                        compressFormat,
+                        if (outputFormat == ImageOutputFormat.JPEG) jpegQuality else 100,
+                        it
+                    )
+                ) {
                     error("Bitmap compression failed")
                 }
             }
+            Log.i(
+                CAPTURE_PERF_TAG,
+                "stage=compress durationMs=${elapsedMillis(compressionStartedNanos)} " +
+                    "format=${outputFormat.name} quality=" +
+                    if (outputFormat == ImageOutputFormat.JPEG) jpegQuality else 100
+            )
 
             if (outputFormat == ImageOutputFormat.JPEG) {
+                val exifStartedNanos = SystemClock.elapsedRealtimeNanos()
                 writeJpegExif(outputUri, bitmap, metadata)
+                Log.i(
+                    CAPTURE_PERF_TAG,
+                    "stage=exif durationMs=${elapsedMillis(exifStartedNanos)}"
+                )
             }
             savedSuccessfully = true
         } catch (e: Exception) {
@@ -369,6 +491,11 @@ class ImageProcessor(private val context: Context) {
                 contentResolver.delete(outputUri, null, null)
             }
         }
+        Log.i(
+            CAPTURE_PERF_TAG,
+            "stage=gallery_write success=$savedSuccessfully " +
+                "durationMs=${elapsedMillis(saveStartedNanos)}"
+        )
         return savedSuccessfully
     }
 
@@ -466,11 +593,22 @@ class ImageProcessor(private val context: Context) {
         return x
     }
 
+    private fun elapsedMillis(
+        startNanos: Long,
+        endNanos: Long = SystemClock.elapsedRealtimeNanos()
+    ): String {
+        return String.format(
+            Locale.US,
+            "%.2f",
+            (endNanos - startNanos) / 1_000_000.0
+        )
+    }
+
     companion object {
+        private const val CAPTURE_PERF_TAG = "C1CapturePerf"
         private const val PREVIEW_MAX_DIMENSION = 1920
         private const val FILENAME_FORMAT = "yyyy-MM-dd-HH-mm-ss-SSS"
         private const val EXIF_DATE_FORMAT = "yyyy:MM:dd HH:mm:ss"
         private const val EXIF_SUBSECOND_FORMAT = "SSS"
-        private const val JPEG_QUALITY = 100
     }
 }
