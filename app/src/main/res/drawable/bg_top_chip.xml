@@ -3,16 +3,24 @@
     <item android:state_checked="true">
         <shape>
             <corners android:radius="16dp" />
-            <solid android:color="@color/cam_accent_soft" />
+            <gradient
+                android:angle="270"
+                android:startColor="#FFF1FFA7"
+                android:centerColor="@color/cam_accent"
+                android:endColor="#FF78970F" />
             <stroke
                 android:width="1dp"
-                android:color="@color/cam_accent" />
+                android:color="#E8FFFFFF" />
         </shape>
     </item>
     <item android:state_pressed="true">
         <shape>
             <corners android:radius="16dp" />
-            <solid android:color="#38FFFFFF" />
+            <gradient
+                android:angle="270"
+                android:startColor="#FF171B1F"
+                android:centerColor="#FF272E34"
+                android:endColor="#FF090B0D" />
             <stroke
                 android:width="1dp"
                 android:color="@color/cam_accent" />
@@ -21,10 +29,14 @@
     <item>
         <shape>
             <corners android:radius="16dp" />
-            <solid android:color="#24FFFFFF" />
+            <gradient
+                android:angle="270"
+                android:startColor="#FF3B434A"
+                android:centerColor="#FF20262B"
+                android:endColor="#FF0A0D0F" />
             <stroke
                 android:width="1dp"
-                android:color="@color/cam_panel_stroke" />
+                android:color="#72FFFFFF" />
         </shape>
     </item>
 </selector>

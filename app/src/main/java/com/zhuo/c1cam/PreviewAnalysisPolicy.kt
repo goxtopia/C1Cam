@@ -15,7 +15,18 @@ data class PreviewAnalysisPolicy(
         private const val CAMERA_ANALYSIS_WIDTH = 1280
         private const val CAMERA_ANALYSIS_HEIGHT = 720
 
-        fun forMode(mode: PreviewDisplayMode): PreviewAnalysisPolicy {
+        fun forMode(
+            mode: PreviewDisplayMode,
+            isXpanMode: Boolean = false
+        ): PreviewAnalysisPolicy {
+            if (isXpanMode) {
+                return PreviewAnalysisPolicy(
+                    useHighestAvailableResolution = false,
+                    analysisWidth = XpanMode.ANALYSIS_WIDTH,
+                    analysisHeight = XpanMode.ANALYSIS_HEIGHT,
+                    processEveryNthFrame = 2
+                )
+            }
             return when (mode) {
                 PreviewDisplayMode.CAMERA -> PreviewAnalysisPolicy(
                     useHighestAvailableResolution = false,

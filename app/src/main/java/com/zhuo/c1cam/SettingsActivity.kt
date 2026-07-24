@@ -35,6 +35,7 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var focalLengthValue: TextView
     private lateinit var noCropRatioValue: TextView
     private lateinit var lutValue: TextView
+    private lateinit var toneMapValue: TextView
     private lateinit var outputFormatValue: TextView
     private lateinit var jpegQualityValue: TextView
     private lateinit var chromaDenoiseValue: TextView
@@ -72,12 +73,19 @@ class SettingsActivity : AppCompatActivity() {
         focalLengthValue = findViewById(R.id.focal_length_value)
         noCropRatioValue = findViewById(R.id.no_crop_ratio_value)
         lutValue = findViewById(R.id.lut_value)
+        toneMapValue = findViewById(R.id.tone_map_value)
         outputFormatValue = findViewById(R.id.output_format_value)
         jpegQualityValue = findViewById(R.id.jpeg_quality_value)
         chromaDenoiseValue = findViewById(R.id.chroma_denoise_value)
 
-        findViewById<View>(R.id.settings_back).setOnClickListener { finish() }
-        findViewById<View>(R.id.selection_back).setOnClickListener { closeSelectionPage() }
+        findViewById<View>(R.id.settings_back).setOnClickListener {
+            performButtonHaptic(it)
+            finish()
+        }
+        findViewById<View>(R.id.selection_back).setOnClickListener {
+            performButtonHaptic(it)
+            closeSelectionPage()
+        }
         findViewById<View>(R.id.target_ratio_row).setOnClickListener {
             openSelectionPage(SelectionMode.TARGET_RATIO)
         }
@@ -89,6 +97,9 @@ class SettingsActivity : AppCompatActivity() {
         }
         findViewById<View>(R.id.lut_row).setOnClickListener {
             openSelectionPage(SelectionMode.LUT)
+        }
+        findViewById<View>(R.id.tone_map_row).setOnClickListener {
+            openSelectionPage(SelectionMode.TONE_MAP)
         }
         findViewById<View>(R.id.output_format_row).setOnClickListener {
             openSelectionPage(SelectionMode.OUTPUT_FORMAT)
@@ -103,6 +114,7 @@ class SettingsActivity : AppCompatActivity() {
             importLutLauncher.launch(arrayOf("text/plain", "application/octet-stream"))
         }
         findViewById<View>(R.id.custom_ratio_apply).setOnClickListener {
+            performButtonHaptic(it)
             applyCustomRatio()
         }
 
@@ -125,6 +137,9 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun bindSwitches() {
+        bindSwitch(R.id.xpan_mode_switch, appSettings.isXpanMode) {
+            appSettings.isXpanMode = it
+        }
         bindSwitch(R.id.sports_switch, appSettings.isSportsMode) {
             appSettings.isSportsMode = it
         }
@@ -152,6 +167,7 @@ class SettingsActivity : AppCompatActivity() {
         val switch = findViewById<MaterialSwitch>(viewId)
         switch.isChecked = initialValue
         switch.setOnCheckedChangeListener { _, isChecked ->
+            switch.performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
             onChanged(isChecked)
             saveSettings()
         }
@@ -168,6 +184,7 @@ class SettingsActivity : AppCompatActivity() {
             SelectionMode.FOCAL_LENGTH -> focalLengthChoices()
             SelectionMode.NO_CROP_RATIO -> noCropRatioChoices()
             SelectionMode.LUT -> lutChoices()
+            SelectionMode.TONE_MAP -> toneMapChoices()
             SelectionMode.OUTPUT_FORMAT -> outputFormatChoices()
             SelectionMode.JPEG_QUALITY -> jpegQualityChoices()
             SelectionMode.CHROMA_DENOISE -> chromaDenoiseChoices()
@@ -178,6 +195,7 @@ class SettingsActivity : AppCompatActivity() {
             SelectionMode.FOCAL_LENGTH -> "Equivalent focal length"
             SelectionMode.NO_CROP_RATIO -> "No-crop framing ratio"
             SelectionMode.LUT -> "Color profile"
+            SelectionMode.TONE_MAP -> "Tone mapping"
             SelectionMode.OUTPUT_FORMAT -> "File format"
             SelectionMode.JPEG_QUALITY -> "JPEG quality"
             SelectionMode.CHROMA_DENOISE -> "Chroma noise reduction"
@@ -187,6 +205,7 @@ class SettingsActivity : AppCompatActivity() {
             SelectionMode.FOCAL_LENGTH -> "Choose the lens equivalent used by the framing guide."
             SelectionMode.NO_CROP_RATIO -> "Choose the guide shown when crop mode is disabled."
             SelectionMode.LUT -> "Choose a look. The live preview updates after returning to the camera."
+            SelectionMode.TONE_MAP -> "Applied before the selected color profile in preview and capture."
             SelectionMode.OUTPUT_FORMAT -> "JPEG stores capture metadata. PNG preserves pixels losslessly."
             SelectionMode.JPEG_QUALITY -> "Higher quality produces larger JPEG files and takes longer to encode."
             SelectionMode.CHROMA_DENOISE -> "Auto selects strength from the ISO recorded for each capture."
@@ -227,6 +246,10 @@ class SettingsActivity : AppCompatActivity() {
 
             SelectionMode.LUT -> {
                 appSettings.lutName = choice.storageKey
+            }
+
+            SelectionMode.TONE_MAP -> {
+                appSettings.toneMapPreset = choice.toneMapPreset ?: return
             }
 
             SelectionMode.OUTPUT_FORMAT -> {
@@ -367,6 +390,16 @@ class SettingsActivity : AppCompatActivity() {
         )
     }
 
+    private fun toneMapChoices(): List<Choice> {
+        return ToneMapPreset.entries.map { preset ->
+            Choice(
+                label = "${preset.displayName} · ${preset.description}",
+                toneMapPreset = preset,
+                selected = appSettings.toneMapPreset == preset
+            )
+        }
+    }
+
     private fun jpegQualityChoices(): List<Choice> {
         return JpegQuality.choices.map { quality ->
             Choice(
@@ -412,6 +445,7 @@ class SettingsActivity : AppCompatActivity() {
         focalLengthValue.text = "${appSettings.focalLength} mm"
         noCropRatioValue.text = noCropRatioLabel(appSettings.noCropAspectRatio)
         lutValue.text = lutLabel(appSettings.lutName)
+        toneMapValue.text = appSettings.toneMapPreset.displayName
         outputFormatValue.text = appSettings.imageOutputFormat.name
         jpegQualityValue.text = appSettings.jpegQuality.toString()
         chromaDenoiseValue.text = appSettings.chromaDenoiseMode.displayName
@@ -550,11 +584,16 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 
+    private fun performButtonHaptic(view: View) {
+        view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+    }
+
     private enum class SelectionMode {
         TARGET_RATIO,
         FOCAL_LENGTH,
         NO_CROP_RATIO,
         LUT,
+        TONE_MAP,
         OUTPUT_FORMAT,
         JPEG_QUALITY,
         CHROMA_DENOISE
@@ -566,6 +605,7 @@ class SettingsActivity : AppCompatActivity() {
         val intValue: Int? = null,
         val storageKey: String? = null,
         val outputFormat: ImageOutputFormat? = null,
+        val toneMapPreset: ToneMapPreset? = null,
         val chromaDenoiseMode: ChromaDenoiseMode? = null,
         val selected: Boolean = false
     )

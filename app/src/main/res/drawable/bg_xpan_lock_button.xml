@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="utf-8"?>
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Disabled: quiet, but the silhouette and label remain legible. -->
+    <item android:state_enabled="false">
+        <layer-list>
+            <item>
+                <shape android:shape="rectangle">
+                    <corners android:radius="7dp" />
+                    <solid android:color="#FF080A0B" />
+                    <stroke
+                        android:width="1dp"
+                        android:color="#384D5357" />
+                </shape>
+            </item>
+            <item
+                android:left="1dp"
+                android:top="1dp"
+                android:right="1dp"
+                android:bottom="1dp">
+                <shape android:shape="rectangle">
+                    <corners android:radius="6dp" />
+                    <gradient
+                        android:angle="270"
+                        android:startColor="#FF303538"
+                        android:centerColor="#FF222629"
+                        android:endColor="#FF15181A" />
+                </shape>
+            </item>
+        </layer-list>
+    </item>
+
+    <!-- Locked and being pressed: deepest recessed state. -->
+    <item
+        android:state_selected="true"
+        android:state_pressed="true">
+        <layer-list>
+            <item>
+                <shape android:shape="rectangle">
+                    <corners android:radius="7dp" />
+                    <solid android:color="#FF050607" />
+                    <stroke
+                        android:width="1dp"
+                        android:color="#FF737A7E" />
+                </shape>
+            </item>
+            <item
+                android:left="2dp"
+                android:top="2dp"
+                android:right="2dp"
+                android:bottom="1dp">
+                <shape android:shape="rectangle">
+                    <corners android:radius="5dp" />
+                    <gradient
+                        android:angle="270"
+                        android:startColor="#FF222629"
+                        android:centerColor="#FF111416"
+                        android:endColor="#FF080A0B" />
+                    <stroke
+                        android:width="1dp"
+                        android:color="#4AADB4B8" />
+                </shape>
+            </item>
+        </layer-list>
+    </item>
+
+    <!-- Locked: black-grey, inset like a latched mechanical switch. -->
+    <item android:state_selected="true">
+        <layer-list>
+            <item>
+                <shape android:shape="rectangle">
+                    <corners android:radius="7dp" />
+                    <solid android:color="#FF050607" />
+                    <stroke
+                        android:width="1dp"
+                        android:color="#FF8A9296" />
+                </shape>
+            </item>
+            <item
+                android:left="2dp"
+                android:top="2dp"
+                android:right="2dp"
+                android:bottom="1dp">
+                <shape android:shape="rectangle">
+                    <corners android:radius="5dp" />
+                    <gradient
+                        android:angle="270"
+                        android:startColor="#FF363B3E"
+                        android:centerColor="#FF202427"
+                        android:endColor="#FF0C0F10" />
+                    <stroke
+                        android:width="1dp"
+                        android:color="#527F878B" />
+                </shape>
+            </item>
+        </layer-list>
+    </item>
+
+    <!-- Unlocked while pressed: temporarily moves into the dark-grey well. -->
+    <item android:state_pressed="true">
+        <layer-list>
+            <item>
+                <shape android:shape="rectangle">
+                    <corners android:radius="7dp" />
+                    <solid android:color="#FF070809" />
+                    <stroke
+                        android:width="1dp"
+                        android:color="#FFA1A7AA" />
+                </shape>
+            </item>
+            <item
+                android:left="2dp"
+                android:top="2dp"
+                android:right="2dp"
+                android:bottom="1dp">
+                <shape android:shape="rectangle">
+                    <corners android:radius="5dp" />
+                    <gradient
+                        android:angle="270"
+                        android:startColor="#FF404548"
+                        android:centerColor="#FF272B2E"
+                        android:endColor="#FF121516" />
+                    <stroke
+                        android:width="1dp"
+                        android:color="#587F868A" />
+                </shape>
+            </item>
+        </layer-list>
+    </item>
+
+    <!-- Unlocked: neutral lead-grey metal, slightly raised. -->
+    <item>
+        <layer-list>
+            <item>
+                <shape android:shape="rectangle">
+                    <corners android:radius="7dp" />
+                    <solid android:color="#FF111314" />
+                    <stroke
+                        android:width="1dp"
+                        android:color="#FFD3D6D7" />
+                </shape>
+            </item>
+            <item
+                android:left="1dp"
+                android:top="1dp"
+                android:right="1dp"
+                android:bottom="2dp">
+                <shape android:shape="rectangle">
+                    <corners android:radius="6dp" />
+                    <gradient
+                        android:angle="270"
+                        android:startColor="#FF9B9FA1"
+                        android:centerColor="#FF72777A"
+                        android:endColor="#FF464B4E" />
+                    <stroke
+                        android:width="1dp"
+                        android:color="#A8F4F6F6" />
+                </shape>
+            </item>
+        </layer-list>
+    </item>
+</selector>

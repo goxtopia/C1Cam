@@ -9,10 +9,12 @@ import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
 import android.view.KeyEvent
+import android.view.Gravity
 import android.view.Surface
 import android.view.View
 import android.widget.Button
 import android.widget.ImageView
+import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -23,6 +25,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.google.android.material.slider.Slider
 import java.io.File
+import kotlin.math.roundToInt
 
 class MainActivity : AppCompatActivity() {
 
@@ -42,11 +45,27 @@ class MainActivity : AppCompatActivity() {
     private lateinit var bottomControls: View
     private lateinit var mainViewContainer: android.widget.FrameLayout
     private lateinit var cameraContainer: View
+    private lateinit var liveViewLabel: View
+    private lateinit var xpanDashboard: XpanDashboardView
+    private lateinit var xpanBottomControls: View
+    private lateinit var xpanViewfinderLabel: TextView
+    private lateinit var xpanViewfinderOverlay: View
+    private lateinit var xpanModeBadge: View
+    private lateinit var cameraStatus: View
+    private lateinit var xpanEvLabel: TextView
+    private lateinit var xpanEvSlider: Slider
+    private lateinit var xpanFocalSlider: Slider
+    private lateinit var xpanFocalValue: TextView
+    private lateinit var xpanMeteringButton: ImageView
+    private lateinit var xpanAeLockButton: TextView
+    private lateinit var xpanAfLockButton: TextView
+    private lateinit var xpanCaptureButton: com.google.android.material.floatingactionbutton.FloatingActionButton
     private lateinit var deviceOrientationManager: DeviceOrientationManager
-    private lateinit var orientationAwareControls: List<View>
 
     private var isFullscreen = false
     private var isRectifiedMain = false
+    private var lastEvHapticStep: Int? = null
+    private var lastFocalHapticStep: Int? = null
     private var hasDeviceRotationSample = false
     @Volatile
     private var latestDeviceRotation = Surface.ROTATION_0
@@ -59,6 +78,8 @@ class MainActivity : AppCompatActivity() {
     
     @Volatile
     private var currentLut: Lut3D? = null
+    @Volatile
+    private var pipelineLut: Lut3D? = null
 
     private val activityResultLauncher =
         registerForActivityResult(
@@ -113,6 +134,21 @@ class MainActivity : AppCompatActivity() {
         bottomControls = findViewById(R.id.bottom_controls)
         cameraContainer = findViewById(R.id.camera_container)
         mainViewContainer = findViewById(R.id.main_view_container)
+        liveViewLabel = findViewById(R.id.live_view_label)
+        xpanDashboard = findViewById(R.id.xpan_dashboard)
+        xpanBottomControls = findViewById(R.id.xpan_bottom_controls)
+        xpanViewfinderLabel = findViewById(R.id.xpan_viewfinder_label)
+        xpanViewfinderOverlay = findViewById(R.id.xpan_viewfinder_overlay)
+        xpanModeBadge = findViewById(R.id.xpan_mode_badge)
+        cameraStatus = findViewById(R.id.camera_status)
+        xpanEvLabel = findViewById(R.id.xpan_ev_label)
+        xpanEvSlider = findViewById(R.id.xpan_ev_slider)
+        xpanFocalSlider = findViewById(R.id.xpan_focal_slider)
+        xpanFocalValue = findViewById(R.id.xpan_focal_value)
+        xpanMeteringButton = findViewById(R.id.xpan_metering_button)
+        xpanAeLockButton = findViewById(R.id.xpan_ae_lock_button)
+        xpanAfLockButton = findViewById(R.id.xpan_af_lock_button)
+        xpanCaptureButton = findViewById(R.id.xpan_capture_button)
 
         appSettings = AppSettings(this)
         imageProcessor = ImageProcessor(this)
@@ -127,6 +163,7 @@ class MainActivity : AppCompatActivity() {
                 appSettings.lutName = null
             }
         }
+        rebuildPipelineLut()
 
         cameraManager = CameraManager(
             activity = this,
@@ -135,34 +172,29 @@ class MainActivity : AppCompatActivity() {
             overlay = overlay,
             appSettings = appSettings,
             imageProcessor = imageProcessor,
-            lutProvider = { currentLut },
+            lutProvider = { pipelineLut },
             savedImageRotationDegreesProvider = {
                 OrientationMath.savedImageRotationDegrees(
                     deviceRotation = latestDeviceRotation,
                     displayRotation = latestDisplayRotation
                 )
             },
-            onPreviewSourceAspectRatioChanged = { updateCropFrameGuideUi() }
-        )
-        orientationAwareControls = listOf<View>(
-            findViewById<View>(R.id.brand_mark),
-            editModeToggle,
-            previewDisplayToggle,
-            settingsButton,
-            findViewById<View>(R.id.ev_label),
-            findViewById<View>(R.id.focus_label),
-            focusModeButton,
-            aeLockButton,
-            afLockButton
+            onPreviewSourceAspectRatioChanged = { updateCropFrameGuideUi() },
+            onXpanTelemetryUpdated = { telemetry ->
+                xpanDashboard.updateTelemetry(telemetry)
+            },
+            onAfLockStateChanged = {
+                updateLockButtonsUi()
+            }
         )
         deviceOrientationManager = DeviceOrientationManager(this) { rotation ->
             runOnUiThread {
                 latestDeviceRotation = rotation
                 hasDeviceRotationSample = true
-                // Physical device orientation is only used to keep the controls upright.
-                // CameraX must follow the app display orientation; otherwise a landscape
-                // grip can rotate the crop/LUT while the activity itself is still portrait.
-                rotateControlsToRemainUpright(rotation)
+                // Controls stay screen-fixed so their borders cannot be clipped by their
+                // layout slots. Physical orientation still drives capture rotation and
+                // the XPAN dashboard instruments.
+                updateOrientationDependentUi(rotation)
             }
         }
 
@@ -174,11 +206,16 @@ class MainActivity : AppCompatActivity() {
         updateEditModeButtonUi()
         applyPreviewDisplayMode(shouldSave = false)
         evSlider.value = appSettings.evVal
+        xpanEvSlider.value = appSettings.evVal
+        xpanFocalSlider.value = appSettings.focalLength.coerceIn(24, 50).toFloat()
+        updateXpanFocalValue()
+        updateXpanMeteringButtonUi()
         if (appSettings.savedPoints != null) {
             overlay.setNormalizedPoints(appSettings.savedPoints!!)
         }
 
         overlay.isOverlayVisible = !appSettings.isCropModeOff
+        applyXpanModeUi()
 
         focusSlider.addOnChangeListener { _, value, fromUser ->
             if (fromUser) {
@@ -190,6 +227,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         focusModeButton.setOnClickListener {
+            performCrispButtonHaptic(it)
             appSettings.focusMode = appSettings.focusMode.toggled()
             if (appSettings.focusMode == FocusMode.MANUAL) {
                 appSettings.isAfLocked = false
@@ -201,6 +239,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         aeLockButton.setOnClickListener {
+            performCrispButtonHaptic(it)
             val locked = !appSettings.isAeLocked
             cameraManager.setAeLocked(locked)
             updateLockButtonsUi()
@@ -211,20 +250,84 @@ class MainActivity : AppCompatActivity() {
             if (appSettings.focusMode != FocusMode.AUTO) {
                 return@setOnClickListener
             }
+            performCrispButtonHaptic(it)
             val locked = !appSettings.isAfLocked
             cameraManager.setAfLocked(locked)
             updateLockButtonsUi()
             appSettings.save(overlay.getNormalizedPoints())
         }
+        xpanAeLockButton.setOnClickListener {
+            performCrispButtonHaptic(it)
+            val locked = !appSettings.isAeLocked
+            cameraManager.setAeLocked(locked)
+            updateLockButtonsUi()
+            appSettings.save(overlay.getNormalizedPoints())
+        }
+        xpanEvLabel.setOnClickListener {
+            performCrispButtonHaptic(it)
+            val locked = !appSettings.isAeLocked
+            cameraManager.setAeLocked(locked)
+            updateLockButtonsUi()
+            appSettings.save(overlay.getNormalizedPoints())
+        }
+        xpanAfLockButton.setOnClickListener {
+            performCrispButtonHaptic(it)
+            val locked = !appSettings.isAfLocked
+            cameraManager.setAfLocked(locked)
+            updateLockButtonsUi()
+            appSettings.save(overlay.getNormalizedPoints())
+        }
+        xpanMeteringButton.setOnClickListener {
+            performCrispButtonHaptic(it)
+            val mode = appSettings.xpanMeteringMode.next()
+            val isCustomMeteringSupported = cameraManager.setXpanMeteringMode(mode)
+            updateXpanMeteringButtonUi()
+            updateLockButtonsUi()
+            appSettings.save(overlay.getNormalizedPoints())
+            Toast.makeText(
+                this,
+                if (isCustomMeteringSupported) {
+                    mode.displayName
+                } else {
+                    "${mode.displayName} · device fallback"
+                },
+                Toast.LENGTH_SHORT
+            ).show()
+        }
 
         evSlider.addOnChangeListener { _, value, fromUser ->
             if (fromUser) {
+                performEvTickIfNeeded(slider = evSlider, value = value)
                 appSettings.evVal = value
+                xpanEvSlider.value = value
                 cameraManager.setExposureCompensation(value)
+            }
+        }
+        xpanEvSlider.addOnChangeListener { _, value, fromUser ->
+            if (fromUser) {
+                performEvTickIfNeeded(slider = xpanEvSlider, value = value)
+                appSettings.evVal = value
+                evSlider.value = value
+                cameraManager.setExposureCompensation(value)
+            }
+        }
+        xpanFocalSlider.addOnChangeListener { _, value, fromUser ->
+            if (fromUser) {
+                val step = value.roundToInt()
+                if (lastFocalHapticStep != step) {
+                    xpanFocalSlider.performHapticFeedback(
+                        android.view.HapticFeedbackConstants.CLOCK_TICK
+                    )
+                    lastFocalHapticStep = step
+                }
+                appSettings.focalLength = value.toInt()
+                updateXpanFocalValue()
+                cameraManager.setEquivalentFocalLength(appSettings.focalLength)
             }
         }
 
         editModeToggle.setOnClickListener {
+            performCrispButtonHaptic(it)
             val isChecked = !overlay.isEditMode
             if (isChecked && isRectifiedMain) {
                 Toast.makeText(this, "Can only edit when camera is visible", Toast.LENGTH_SHORT).show()
@@ -237,7 +340,9 @@ class MainActivity : AppCompatActivity() {
         }
 
         overlay.onDoubleTapListener = {
-            toggleFullscreen()
+            if (!appSettings.isXpanMode) {
+                toggleFullscreen()
+            }
         }
         previewRectified.setOnTouchListener(object : View.OnTouchListener {
             private var lastClickTime: Long = 0
@@ -245,7 +350,7 @@ class MainActivity : AppCompatActivity() {
             override fun onTouch(v: View, event: android.view.MotionEvent): Boolean {
                 if (event.action == android.view.MotionEvent.ACTION_UP) {
                     val clickTime = System.currentTimeMillis()
-                    if (clickTime - lastClickTime < 300) {
+                    if (clickTime - lastClickTime < 300 && !appSettings.isXpanMode) {
                         toggleFullscreen()
                     }
                     lastClickTime = clickTime
@@ -254,7 +359,12 @@ class MainActivity : AppCompatActivity() {
             }
         })
         overlay.onSingleTapListener = { x, y ->
-            if (FocusModeUiModel.isTapToFocusEnabled(appSettings.focusMode, appSettings.isTapToFocusEnabled)) {
+            if (!appSettings.isXpanMode &&
+                FocusModeUiModel.isTapToFocusEnabled(
+                    appSettings.focusMode,
+                    appSettings.isTapToFocusEnabled
+                )
+            ) {
                 overlay.showFocusIndicator(x, y, Color.WHITE)
                 cameraManager.focusOnPoint(x, y) { success ->
                     overlay.showFocusIndicator(
@@ -267,10 +377,12 @@ class MainActivity : AppCompatActivity() {
         }
 
         settingsButton.setOnClickListener {
+            performCrispButtonHaptic(it)
             settingsLauncher.launch(Intent(this, SettingsActivity::class.java))
         }
 
         previewDisplayToggle.setOnClickListener {
+            performCrispButtonHaptic(it)
             if (overlay.isEditMode && appSettings.previewDisplayMode == PreviewDisplayMode.CAMERA) {
                 overlay.isEditMode = false
                 updateEditModeButtonUi()
@@ -281,6 +393,9 @@ class MainActivity : AppCompatActivity() {
         }
 
         captureButton.setOnClickListener {
+            triggerCapture()
+        }
+        xpanCaptureButton.setOnClickListener {
             triggerCapture()
         }
 
@@ -311,13 +426,19 @@ class MainActivity : AppCompatActivity() {
         if (appSettings.lutName != null && currentLut == null) {
             appSettings.lutName = null
         }
+        rebuildPipelineLut()
 
         focusSlider.value = appSettings.focusVal
         evSlider.value = appSettings.evVal
-        overlay.isOverlayVisible = !appSettings.isCropModeOff
+        xpanEvSlider.value = appSettings.evVal
+        xpanFocalSlider.value = appSettings.focalLength.coerceIn(24, 50).toFloat()
+        updateXpanFocalValue()
+        updateXpanMeteringButtonUi()
+        overlay.isOverlayVisible = !appSettings.isXpanMode && !appSettings.isCropModeOff
         updateFocusModeUi()
         updateLockButtonsUi()
         applyPreviewDisplayMode(shouldSave = false)
+        applyXpanModeUi()
 
         cameraManager.updateCameraSettings()
         cameraManager.applyFocusMode()
@@ -339,6 +460,36 @@ class MainActivity : AppCompatActivity() {
         aeLockButton.alpha = if (appSettings.isAeLocked) 1f else 0.72f
         afLockButton.isEnabled = appSettings.focusMode == FocusMode.AUTO
         afLockButton.alpha = if (appSettings.focusMode != FocusMode.AUTO) 0.35f else if (appSettings.isAfLocked) 1f else 0.72f
+        aeLockButton.setBackgroundResource(
+            if (appSettings.isAeLocked) R.drawable.bg_metal_button_active
+            else R.drawable.bg_metal_button
+        )
+        afLockButton.setBackgroundResource(
+            if (appSettings.isAfLocked) R.drawable.bg_metal_button_active
+            else R.drawable.bg_metal_button
+        )
+
+        xpanAeLockButton.text = "AEL"
+        xpanAfLockButton.text = "AFL"
+        val xpanAfEnabled = XpanMode.effectiveFocusMode(
+            appSettings.isXpanMode,
+            appSettings.focusMode
+        ) == FocusMode.AUTO
+        xpanAfLockButton.isEnabled = xpanAfEnabled
+        applyXpanLockVisual(xpanAeLockButton, appSettings.isAeLocked, enabled = true)
+        applyXpanLockVisual(xpanEvLabel, appSettings.isAeLocked, enabled = true)
+        applyXpanLockVisual(xpanAfLockButton, appSettings.isAfLocked, xpanAfEnabled)
+    }
+
+    private fun applyXpanLockVisual(button: TextView, locked: Boolean, enabled: Boolean) {
+        button.isSelected = locked && enabled
+        button.alpha = if (enabled) 1f else 0.62f
+        button.elevation = when {
+            !enabled -> 0f
+            locked -> 0f
+            else -> dp(3).toFloat()
+        }
+        button.translationZ = 0f
     }
 
     private fun updatePreviewDisplayUi() {
@@ -348,7 +499,7 @@ class MainActivity : AppCompatActivity() {
     private fun updateCropFrameGuideUi() {
         val showGuide = CropFrameGuideModel.shouldShowGuide(
             isSettingEnabled = appSettings.isCropFrameGuideVisible,
-            isCropModeOff = appSettings.isCropModeOff,
+            isCropModeOff = appSettings.isCropModeOff && !appSettings.isXpanMode,
             previewDisplayMode = appSettings.previewDisplayMode
         )
         overlay.isCropFrameGuideVisible = showGuide
@@ -406,6 +557,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun applyPreviewDisplayMode(shouldSave: Boolean = true) {
+        if (appSettings.isXpanMode) {
+            isRectifiedMain = false
+            cameraContainer.visibility = View.VISIBLE
+            previewRectified.visibility = View.GONE
+            overlay.isEnabled = false
+            updatePreviewDisplayUi()
+            updateCropFrameGuideUi()
+            return
+        }
         isRectifiedMain = appSettings.previewDisplayMode == PreviewDisplayMode.RECTIFIED
         val showCamera = appSettings.previewDisplayMode == PreviewDisplayMode.CAMERA
 
@@ -438,6 +598,118 @@ class MainActivity : AppCompatActivity() {
         editModeToggle.text = ""
     }
 
+    private fun applyXpanModeUi() {
+        val enabled = appSettings.isXpanMode
+        if (enabled) {
+            overlay.isEditMode = false
+        }
+
+        xpanDashboard.setActive(enabled)
+        xpanBottomControls.visibility = if (enabled) View.VISIBLE else View.GONE
+        bottomControls.visibility = if (enabled) View.GONE else View.VISIBLE
+        editModeToggle.visibility = if (enabled) View.GONE else View.VISIBLE
+        previewDisplayToggle.visibility = if (enabled) View.GONE else View.VISIBLE
+        cameraStatus.visibility = if (enabled) View.GONE else View.VISIBLE
+        xpanModeBadge.visibility = if (enabled) View.VISIBLE else View.GONE
+        xpanViewfinderLabel.visibility = if (enabled) View.VISIBLE else View.GONE
+        xpanViewfinderOverlay.visibility = if (enabled) View.VISIBLE else View.GONE
+        liveViewLabel.visibility = if (enabled) View.GONE else View.VISIBLE
+        overlay.isEnabled = !enabled
+        overlay.isOverlayVisible = !enabled && !appSettings.isCropModeOff
+        viewFinder.scaleType = if (enabled) {
+            PreviewView.ScaleType.FILL_CENTER
+        } else {
+            PreviewView.ScaleType.FIT_CENTER
+        }
+
+        val mainParams = mainViewContainer.layoutParams as
+            androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
+        mainParams.bottomToTop = if (enabled) R.id.xpan_bottom_controls else R.id.bottom_controls
+        mainViewContainer.layoutParams = mainParams
+
+        mainViewContainer.post {
+            val params = cameraContainer.layoutParams as android.widget.FrameLayout.LayoutParams
+            if (enabled) {
+                val frame = XpanFrameLayoutModel.calculate(
+                    mainViewContainer.width,
+                    mainViewContainer.height
+                )
+                params.width = frame.width
+                params.height = frame.height
+                val isVerticalFrame = frame.height > frame.width
+                xpanViewfinderLabel.text = if (isVerticalFrame) {
+                    "24 × 65  ·  AF-C"
+                } else {
+                    "65 × 24  ·  AF-C"
+                }
+                params.gravity = Gravity.TOP or if (isVerticalFrame) Gravity.END else Gravity.START
+                params.setMargins(
+                    if (isVerticalFrame) 0 else dp(16),
+                    dp(18),
+                    if (isVerticalFrame) dp(16) else 0,
+                    0
+                )
+                cameraContainer.setBackgroundResource(R.drawable.bg_xpan_viewfinder)
+                cameraContainer.setPadding(dp(4), dp(4), dp(4), dp(4))
+                cameraContainer.clipToOutline = true
+
+                val labelParams = xpanViewfinderLabel.layoutParams as
+                    android.widget.FrameLayout.LayoutParams
+                labelParams.gravity = Gravity.TOP or if (isVerticalFrame) Gravity.END else Gravity.START
+                labelParams.setMargins(
+                    if (isVerticalFrame) 0 else dp(27),
+                    dp(29),
+                    if (isVerticalFrame) dp(27) else 0,
+                    0
+                )
+                xpanViewfinderLabel.layoutParams = labelParams
+            } else {
+                params.width = android.widget.FrameLayout.LayoutParams.MATCH_PARENT
+                params.height = android.widget.FrameLayout.LayoutParams.MATCH_PARENT
+                params.gravity = Gravity.NO_GRAVITY
+                params.setMargins(0, 0, 0, 0)
+                cameraContainer.background = null
+                cameraContainer.setPadding(0, 0, 0, 0)
+                cameraContainer.clipToOutline = false
+            }
+            cameraContainer.layoutParams = params
+        }
+        updateFocusModeUi()
+        updateLockButtonsUi()
+        updateEditModeButtonUi()
+        updateCropFrameGuideUi()
+    }
+
+    private fun updateXpanFocalValue() {
+        xpanFocalValue.text = "${appSettings.focalLength.coerceIn(24, 50)} MM"
+    }
+
+    private fun updateXpanMeteringButtonUi() {
+        xpanMeteringButton.setImageResource(
+            when (appSettings.xpanMeteringMode) {
+                XpanMeteringMode.AVERAGE -> R.drawable.ic_metering_average
+                XpanMeteringMode.CENTER_WEIGHTED -> R.drawable.ic_metering_center
+                XpanMeteringMode.SPOT -> R.drawable.ic_metering_spot
+            }
+        )
+        xpanMeteringButton.contentDescription = appSettings.xpanMeteringMode.displayName
+    }
+
+    private fun dp(value: Int): Int {
+        return (value * resources.displayMetrics.density).toInt()
+    }
+
+    private fun performEvTickIfNeeded(slider: Slider, value: Float) {
+        val step = value.roundToInt()
+        if (lastEvHapticStep == step) return
+        slider.performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
+        lastEvHapticStep = step
+    }
+
+    private fun performCrispButtonHaptic(view: View) {
+        view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+    }
+
     private fun loadLutFromStorageKey(storageKey: String): Lut3D? {
         return when {
             storageKey.startsWith("$LUT_KEY_PREFIX_ASSET:") -> {
@@ -453,6 +725,13 @@ class MainActivity : AppCompatActivity() {
             }
             else -> LutUtils.loadLut(this, storageKey)
         }
+    }
+
+    private fun rebuildPipelineLut() {
+        pipelineLut = ToneMapLutFactory.compose(
+            preset = appSettings.toneMapPreset,
+            creativeLut = currentLut
+        )
     }
 
     private fun normalizeLutStorageKey(storedValue: String): String {
@@ -524,26 +803,17 @@ class MainActivity : AppCompatActivity() {
             latestDeviceRotation = displayRotation
         }
         cameraManager.updateTargetRotation(displayRotation)
-        rotateControlsToRemainUpright(displayRotation)
+        updateOrientationDependentUi(displayRotation)
         viewFinder.post { updateCropFrameGuideUi() }
     }
 
-    private fun rotateControlsToRemainUpright(deviceRotation: Int) {
+    private fun updateOrientationDependentUi(deviceRotation: Int) {
         val displayRotation = viewFinder.display?.rotation ?: Surface.ROTATION_0
-        val controlRotation = OrientationMath.controlRotationDegrees(
-            deviceRotation = deviceRotation,
-            displayRotation = displayRotation
-        ).toFloat()
-
-        orientationAwareControls.forEach { view ->
-            view.animate()
-                .rotation(controlRotation)
-                .setDuration(ORIENTATION_ANIMATION_DURATION_MS)
-                .start()
-        }
+        xpanDashboard.setOrientation(deviceRotation, displayRotation)
     }
 
     private fun toggleFullscreen() {
+        if (appSettings.isXpanMode) return
         isFullscreen = !isFullscreen
         val params = mainViewContainer.layoutParams as androidx.constraintlayout.widget.ConstraintLayout.LayoutParams
 
@@ -580,7 +850,6 @@ class MainActivity : AppCompatActivity() {
         private const val LUT_KEY_PREFIX_ASSET = "asset"
         private const val LUT_KEY_PREFIX_IMPORTED = "imported"
         private const val IMPORTED_LUT_DIR_NAME = "imported_luts"
-        private const val ORIENTATION_ANIMATION_DURATION_MS = 220L
         private val REQUIRED_PERMISSIONS = mutableListOf(Manifest.permission.CAMERA).apply {
             if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
                 add(Manifest.permission.WRITE_EXTERNAL_STORAGE)

@@ -27,6 +27,9 @@ class AppSettings(private val context: Context) {
     var isCropFrameGuideVisible: Boolean = false
     var imageOutputFormat: ImageOutputFormat = ImageOutputFormat.JPEG
     var jpegQuality: Int = JpegQuality.DEFAULT
+    var isXpanMode: Boolean = false
+    var xpanMeteringMode: XpanMeteringMode = XpanMeteringMode.CENTER_WEIGHTED
+    var toneMapPreset: ToneMapPreset = ToneMapPreset.NONE
     var savedPoints: List<PointF>? = null
 
     init {
@@ -65,6 +68,13 @@ class AppSettings(private val context: Context) {
         )
         jpegQuality = JpegQuality.sanitize(
             prefs.getInt(KEY_JPEG_QUALITY, JpegQuality.DEFAULT)
+        )
+        isXpanMode = prefs.getBoolean(KEY_XPAN_MODE, false)
+        xpanMeteringMode = XpanMeteringMode.fromStorageValue(
+            prefs.getString(KEY_XPAN_METERING_MODE, XpanMeteringMode.CENTER_WEIGHTED.storageValue)
+        )
+        toneMapPreset = ToneMapPreset.fromStorageValue(
+            prefs.getString(KEY_TONE_MAP_PRESET, ToneMapPreset.NONE.storageValue)
         )
 
         val pointsStr = prefs.getString(KEY_POINTS, null)
@@ -106,6 +116,9 @@ class AppSettings(private val context: Context) {
         editor.putBoolean(KEY_CROP_FRAME_GUIDE_VISIBLE, isCropFrameGuideVisible)
         editor.putString(KEY_IMAGE_OUTPUT_FORMAT, imageOutputFormat.storageValue)
         editor.putInt(KEY_JPEG_QUALITY, jpegQuality)
+        editor.putBoolean(KEY_XPAN_MODE, isXpanMode)
+        editor.putString(KEY_XPAN_METERING_MODE, xpanMeteringMode.storageValue)
+        editor.putString(KEY_TONE_MAP_PRESET, toneMapPreset.storageValue)
 
         if (currentPoints.size == 4) {
             val sb = StringBuilder()
@@ -143,5 +156,8 @@ class AppSettings(private val context: Context) {
         private const val KEY_CROP_FRAME_GUIDE_VISIBLE = "crop_frame_guide_visible"
         private const val KEY_IMAGE_OUTPUT_FORMAT = "image_output_format"
         private const val KEY_JPEG_QUALITY = "jpeg_quality"
+        private const val KEY_XPAN_MODE = "xpan_mode"
+        private const val KEY_XPAN_METERING_MODE = "xpan_metering_mode"
+        private const val KEY_TONE_MAP_PRESET = "tone_map_preset"
     }
 }

@@ -59,6 +59,26 @@
                 android:textSize="9sp" />
         </LinearLayout>
 
+        <TextView
+            android:id="@+id/xpan_mode_badge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="11dp"
+            android:background="@drawable/bg_value_pill"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.12"
+            android:paddingStart="9dp"
+            android:paddingTop="5dp"
+            android:paddingEnd="9dp"
+            android:paddingBottom="5dp"
+            android:text="XPAN · 65:24"
+            android:textColor="@color/cam_accent"
+            android:textSize="8sp"
+            android:visibility="gone"
+            app:layout_constraintBottom_toBottomOf="@id/brand_mark"
+            app:layout_constraintStart_toEndOf="@id/brand_mark"
+            app:layout_constraintTop_toTopOf="@id/brand_mark" />
+
         <com.google.android.material.button.MaterialButton
             android:id="@+id/edit_mode_toggle"
             style="@style/Widget.Material3.Button.IconButton"
@@ -139,6 +159,12 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/top_controls">
 
+        <com.zhuo.c1cam.XpanDashboardView
+            android:id="@+id/xpan_dashboard"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone" />
+
         <FrameLayout
             android:id="@+id/camera_container"
             android:layout_width="match_parent"
@@ -155,7 +181,30 @@
                 android:id="@+id/overlay"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent" />
+
+            <com.zhuo.c1cam.XpanViewfinderOverlayView
+                android:id="@+id/xpan_viewfinder_overlay"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:visibility="gone" />
         </FrameLayout>
+
+        <TextView
+            android:id="@+id/xpan_viewfinder_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|start"
+            android:background="@drawable/bg_viewfinder_label"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.1"
+            android:paddingStart="9dp"
+            android:paddingTop="5dp"
+            android:paddingEnd="9dp"
+            android:paddingBottom="5dp"
+            android:text="65 × 24  ·  AF-C"
+            android:textColor="@color/cam_accent"
+            android:textSize="8sp"
+            android:visibility="gone" />
 
         <ImageView
             android:id="@+id/preview_rectified"
@@ -225,22 +274,34 @@
                     android:textColor="@color/cam_text_primary"
                     android:textSize="10sp" />
 
-                <com.google.android.material.slider.Slider
-                    android:id="@+id/ev_slider"
+                <FrameLayout
                     android:layout_width="0dp"
-                    android:layout_height="wrap_content"
+                    android:layout_height="match_parent"
                     android:layout_marginStart="10dp"
-                    android:layout_weight="1"
-                    android:stepSize="1.0"
-                    android:value="0.0"
-                    android:valueFrom="-3.0"
-                    android:valueTo="3.0"
-                    app:haloColor="@color/cam_accent_soft"
-                    app:thumbColor="@color/cam_text_primary"
-                    app:thumbRadius="7dp"
-                    app:trackColorActive="@color/cam_accent"
-                    app:trackColorInactive="@color/cam_track_inactive"
-                    app:trackHeight="2dp" />
+                    android:layout_weight="1">
+
+                    <com.zhuo.c1cam.InstrumentScaleView
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        app:scaleCenterAccent="true"
+                        app:scaleDivisions="6" />
+
+                    <com.google.android.material.slider.Slider
+                        android:id="@+id/ev_slider"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:stepSize="1.0"
+                        android:value="0.0"
+                        android:valueFrom="-3.0"
+                        android:valueTo="3.0"
+                        app:haloColor="@color/cam_accent_soft"
+                        app:thumbColor="@color/cam_text_primary"
+                        app:thumbRadius="7dp"
+                        app:tickVisible="false"
+                        app:trackColorActive="@color/cam_accent"
+                        app:trackColorInactive="#24FFFFFF"
+                        app:trackHeight="2dp" />
+                </FrameLayout>
             </LinearLayout>
 
             <LinearLayout
@@ -261,21 +322,32 @@
                     android:textColor="@color/cam_text_primary"
                     android:textSize="8sp" />
 
-                <com.google.android.material.slider.Slider
-                    android:id="@+id/focus_slider"
+                <FrameLayout
                     android:layout_width="0dp"
-                    android:layout_height="wrap_content"
+                    android:layout_height="match_parent"
                     android:layout_marginStart="10dp"
-                    android:layout_weight="1"
-                    android:value="0.0"
-                    android:valueFrom="0.0"
-                    android:valueTo="1.0"
-                    app:haloColor="@color/cam_accent_soft"
-                    app:thumbColor="@color/cam_text_primary"
-                    app:thumbRadius="7dp"
-                    app:trackColorActive="@color/cam_accent"
-                    app:trackColorInactive="@color/cam_track_inactive"
-                    app:trackHeight="2dp" />
+                    android:layout_weight="1">
+
+                    <com.zhuo.c1cam.InstrumentScaleView
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        app:scaleDivisions="20" />
+
+                    <com.google.android.material.slider.Slider
+                        android:id="@+id/focus_slider"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:value="0.0"
+                        android:valueFrom="0.0"
+                        android:valueTo="1.0"
+                        app:haloColor="@color/cam_accent_soft"
+                        app:thumbColor="@color/cam_text_primary"
+                        app:thumbRadius="7dp"
+                        app:tickVisible="false"
+                        app:trackColorActive="@color/cam_accent"
+                        app:trackColorInactive="#24FFFFFF"
+                        app:trackHeight="2dp" />
+                </FrameLayout>
             </LinearLayout>
         </LinearLayout>
 
@@ -295,6 +367,7 @@
                 style="@style/Widget.Material3.Button.OutlinedButton"
                 android:layout_width="54dp"
                 android:layout_height="36dp"
+                android:background="@drawable/bg_metal_button"
                 android:fontFamily="sans-serif-medium"
                 android:insetTop="0dp"
                 android:insetBottom="0dp"
@@ -314,6 +387,7 @@
                 android:layout_width="54dp"
                 android:layout_height="36dp"
                 android:layout_marginStart="8dp"
+                android:background="@drawable/bg_metal_button"
                 android:fontFamily="sans-serif-medium"
                 android:insetTop="0dp"
                 android:insetBottom="0dp"
@@ -333,6 +407,7 @@
                 android:layout_width="54dp"
                 android:layout_height="36dp"
                 android:layout_marginStart="8dp"
+                android:background="@drawable/bg_metal_button"
                 android:fontFamily="sans-serif-medium"
                 android:insetTop="0dp"
                 android:insetBottom="0dp"
@@ -363,7 +438,222 @@
             app:maxImageSize="76dp"
             app:pressedTranslationZ="0dp"
             app:rippleColor="@color/cam_accent_soft"
-            app:srcCompat="@drawable/ic_shutter"
+            app:srcCompat="@drawable/ic_shutter_metal"
+            app:tint="@null" />
+
+    </androidx.constraintlayout.widget.ConstraintLayout>
+
+    <androidx.constraintlayout.widget.ConstraintLayout
+        android:id="@+id/xpan_bottom_controls"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:background="@drawable/bg_xpan_controls"
+        android:paddingStart="18dp"
+        android:paddingTop="16dp"
+        android:paddingEnd="18dp"
+        android:paddingBottom="18dp"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent">
+
+        <LinearLayout
+            android:id="@+id/xpan_sliders"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="18dp"
+            android:orientation="vertical"
+            app:layout_constraintEnd_toStartOf="@id/xpan_capture_button"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="44dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:id="@+id/xpan_ev_label"
+                    android:layout_width="50dp"
+                    android:layout_height="28dp"
+                    android:background="@drawable/bg_xpan_lock_button"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:fontFamily="sans-serif-medium"
+                    android:gravity="center"
+                    android:includeFontPadding="false"
+                    android:letterSpacing="0.08"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:padding="0dp"
+                    android:stateListAnimator="@null"
+                    android:text="EV"
+                    android:textAllCaps="false"
+                    android:textColor="@color/xpan_lock_button_text"
+                    android:textSize="9sp" />
+
+                <FrameLayout
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_marginStart="10dp"
+                    android:layout_weight="1">
+
+                    <com.zhuo.c1cam.InstrumentScaleView
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        app:scaleCenterAccent="true"
+                        app:scaleDivisions="6" />
+
+                    <com.google.android.material.slider.Slider
+                        android:id="@+id/xpan_ev_slider"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:stepSize="1.0"
+                        android:value="0.0"
+                        android:valueFrom="-3.0"
+                        android:valueTo="3.0"
+                        app:haloColor="@color/cam_accent_soft"
+                        app:thumbColor="@color/cam_accent"
+                        app:thumbRadius="7dp"
+                        app:tickVisible="false"
+                        app:trackColorActive="@color/cam_accent"
+                        app:trackColorInactive="#24FFFFFF"
+                        app:trackHeight="2dp" />
+                </FrameLayout>
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="44dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:id="@+id/xpan_focal_value"
+                    android:layout_width="50dp"
+                    android:layout_height="28dp"
+                    android:background="@drawable/bg_control_label"
+                    android:fontFamily="sans-serif-medium"
+                    android:gravity="center"
+                    android:text="24"
+                    android:textColor="@color/cam_text_primary"
+                    android:textSize="9sp" />
+
+                <FrameLayout
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_marginStart="10dp"
+                    android:layout_weight="1">
+
+                    <com.zhuo.c1cam.InstrumentScaleView
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        app:scaleDivisions="13" />
+
+                    <com.google.android.material.slider.Slider
+                        android:id="@+id/xpan_focal_slider"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:stepSize="1.0"
+                        android:value="24.0"
+                        android:valueFrom="24.0"
+                        android:valueTo="50.0"
+                        app:haloColor="@color/cam_accent_soft"
+                        app:thumbColor="@color/cam_text_primary"
+                        app:thumbRadius="7dp"
+                        app:tickVisible="false"
+                        app:trackColorActive="@color/cam_text_primary"
+                        app:trackColorInactive="#24FFFFFF"
+                        app:trackHeight="2dp" />
+                </FrameLayout>
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="38dp"
+                android:layout_marginTop="3dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <androidx.appcompat.widget.AppCompatImageView
+                    android:id="@+id/xpan_metering_button"
+                    android:layout_width="0dp"
+                    android:layout_height="32dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_xpan_lock_button"
+                    android:clickable="true"
+                    android:contentDescription="Center-weighted metering"
+                    android:focusable="true"
+                    android:padding="6dp"
+                    android:scaleType="center"
+                    android:stateListAnimator="@null"
+                    app:srcCompat="@drawable/ic_metering_center"
+                    app:tint="@color/xpan_metering_icon_tint" />
+
+                <TextView
+                    android:id="@+id/xpan_ae_lock_button"
+                    android:layout_width="0dp"
+                    android:layout_height="32dp"
+                    android:layout_marginStart="7dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_xpan_lock_button"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:fontFamily="sans-serif-medium"
+                    android:gravity="center"
+                    android:includeFontPadding="false"
+                    android:letterSpacing="0.12"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:padding="0dp"
+                    android:stateListAnimator="@null"
+                    android:text="AEL"
+                    android:textAllCaps="false"
+                    android:textColor="@color/xpan_lock_button_text"
+                    android:textSize="8sp" />
+
+                <TextView
+                    android:id="@+id/xpan_af_lock_button"
+                    android:layout_width="0dp"
+                    android:layout_height="32dp"
+                    android:layout_marginStart="7dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_xpan_lock_button"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:fontFamily="sans-serif-medium"
+                    android:gravity="center"
+                    android:includeFontPadding="false"
+                    android:letterSpacing="0.12"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:padding="0dp"
+                    android:stateListAnimator="@null"
+                    android:text="AFL"
+                    android:textAllCaps="false"
+                    android:textColor="@color/xpan_lock_button_text"
+                    android:textSize="8sp" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <com.google.android.material.floatingactionbutton.FloatingActionButton
+            android:id="@+id/xpan_capture_button"
+            android:layout_width="76dp"
+            android:layout_height="76dp"
+            android:contentDescription="@string/capture"
+            app:backgroundTint="@android:color/transparent"
+            app:borderWidth="0dp"
+            app:elevation="0dp"
+            app:fabCustomSize="76dp"
+            app:hoveredFocusedTranslationZ="0dp"
+            app:layout_constraintBottom_toBottomOf="@id/xpan_sliders"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toTopOf="@id/xpan_sliders"
+            app:maxImageSize="76dp"
+            app:pressedTranslationZ="0dp"
+            app:rippleColor="@color/cam_accent_soft"
+            app:srcCompat="@drawable/ic_shutter_metal"
             app:tint="@null" />
 
     </androidx.constraintlayout.widget.ConstraintLayout>

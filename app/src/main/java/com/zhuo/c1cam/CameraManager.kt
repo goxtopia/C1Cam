@@ -1,12 +1,14 @@
 package com.zhuo.c1cam
 
 import android.graphics.ImageFormat
+import android.graphics.Rect
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraMetadata
 import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.CaptureResult
 import android.hardware.camera2.TotalCaptureResult
+import android.hardware.camera2.params.MeteringRectangle
 import android.os.SystemClock
 import android.util.Log
 import android.util.Size
@@ -40,6 +42,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.math.sqrt
 import kotlin.math.roundToInt
 
 private const val TAP_TO_FOCUS_DURATION_SECONDS = 15L
@@ -54,7 +57,9 @@ class CameraManager(
     private val imageProcessor: ImageProcessor,
     private val lutProvider: () -> Lut3D?,
     private val savedImageRotationDegreesProvider: () -> Int,
-    private val onPreviewSourceAspectRatioChanged: () -> Unit
+    private val onPreviewSourceAspectRatioChanged: () -> Unit,
+    private val onXpanTelemetryUpdated: (XpanTelemetry) -> Unit,
+    private val onAfLockStateChanged: () -> Unit
 ) {
 
     private var imageCapture: ImageCapture? = null
@@ -65,8 +70,11 @@ class CameraManager(
     private var latestAutoFocusDistanceDiopter: Float? = null
     private var pendingAfLockAfterFocus = false
     private var analysisFrameCounter: Long = 0L
+    private var lastTelemetryDispatchElapsedMs = 0L
     @Volatile
     private var latestPreviewSourceAspectRatio: Float = 3f / 4f
+    @Volatile
+    private var latestHistogram = FloatArray(64)
     @Volatile
     private var latestCaptureMetadata: CaptureMetadata? = null
     @Volatile
@@ -89,6 +97,18 @@ class CameraManager(
 
             val previewBuilder = Preview.Builder()
                 .setTargetRotation(targetRotation)
+            if (appSettings.isXpanMode) {
+                previewBuilder.setResolutionSelector(
+                    ResolutionSelector.Builder()
+                        .setResolutionStrategy(
+                            ResolutionStrategy(
+                                Size(XpanMode.PREVIEW_WIDTH, XpanMode.PREVIEW_HEIGHT),
+                                FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
+                            )
+                        )
+                        .build()
+                )
+            }
             Camera2Interop.Extender(previewBuilder)
                 .setSessionCaptureCallback(cameraCaptureCallback)
             val previewUseCase = previewBuilder.build().also {
@@ -104,7 +124,10 @@ class CameraManager(
             val imageCaptureUseCase = imageCaptureBuilder.build()
             imageCapture = imageCaptureUseCase
 
-            val previewAnalysisPolicy = PreviewAnalysisPolicy.forMode(appSettings.previewDisplayMode)
+            val previewAnalysisPolicy = PreviewAnalysisPolicy.forMode(
+                appSettings.previewDisplayMode,
+                appSettings.isXpanMode
+            )
             val imageAnalysisUseCase = createImageAnalysis(previewAnalysisPolicy)
             imageAnalysis = imageAnalysisUseCase
             analysisFrameCounter = 0L
@@ -117,6 +140,13 @@ class CameraManager(
                     rotationDegrees = imageProxy.imageInfo.rotationDegrees
                 ))
                 if (!previewAnalysisPolicy.shouldProcessFrame(frameIndex)) {
+                    imageProxy.close()
+                    return@setAnalyzer
+                }
+
+                if (appSettings.isXpanMode) {
+                    latestHistogram = calculateLumaHistogram(imageProxy)
+                    dispatchXpanTelemetry()
                     imageProxy.close()
                     return@setAnalyzer
                 }
@@ -164,6 +194,9 @@ class CameraManager(
                 updateCameraSettings()
                 applyFocusMode()
                 setExposureCompensation(appSettings.evVal)
+                if (appSettings.isAfLocked && latestAutoFocusDistanceDiopter == null) {
+                    setAfLocked(true)
+                }
 
             } catch (exc: Exception) {
                 Log.e("CameraManager", "Use case binding failed", exc)
@@ -209,9 +242,19 @@ class CameraManager(
         val outputFormat = appSettings.imageOutputFormat
         val jpegQuality = appSettings.jpegQuality
         val chromaDenoiseMode = appSettings.chromaDenoiseMode
-        val isCropModeOff = appSettings.isCropModeOff
+        val isCropModeOff = XpanMode.effectiveCropModeOff(
+            appSettings.isXpanMode,
+            appSettings.isCropModeOff
+        )
         val focalLength = appSettings.focalLength
-        val noCropAspectRatio = appSettings.noCropAspectRatio
+        val processingFocalLength = XpanMode.effectiveProcessingFocalLength(
+            appSettings.isXpanMode,
+            focalLength
+        )
+        val noCropAspectRatio = XpanMode.effectiveNoCropAspectRatio(
+            appSettings.isXpanMode,
+            appSettings.noCropAspectRatio
+        )
         val exposureCompensationEv = appSettings.evVal
         // Freeze orientation at shutter press; sensor changes during processing must not
         // alter the direction of the photo being saved.
@@ -263,7 +306,7 @@ class CameraManager(
                                 lut,
                                 chromaDenoiseMode,
                                 isCropModeOff,
-                                focalLength,
+                                processingFocalLength,
                                 noCropAspectRatio,
                                 outputFormat,
                                 jpegQuality,
@@ -336,6 +379,7 @@ class CameraManager(
     @OptIn(ExperimentalCamera2Interop::class)
     fun updateCameraSettings() {
         applyCaptureRequestOptions()
+        applyZoomRatio()
     }
 
     @OptIn(ExperimentalCamera2Interop::class)
@@ -391,19 +435,106 @@ class CameraManager(
         }
 
         optionsBuilder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_LOCK, appSettings.isAeLocked)
+        if (appSettings.isXpanMode) {
+            buildXpanAeRegions(cameraInfo)?.let { regions ->
+                optionsBuilder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_REGIONS, regions)
+            }
+        }
 
         if (appSettings.isAfLocked) {
             latestAutoFocusDistanceDiopter?.let { diopter ->
                 optionsBuilder.setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
                 optionsBuilder.setCaptureRequestOption(CaptureRequest.LENS_FOCUS_DISTANCE, diopter)
             } ?: Log.w("CameraManager", "AF lock requested but no autofocus distance has been captured yet")
-        } else if (appSettings.focusMode == FocusMode.MANUAL) {
+        } else if (XpanMode.effectiveFocusMode(
+                appSettings.isXpanMode,
+                appSettings.focusMode
+            ) == FocusMode.MANUAL
+        ) {
             val diopter = sliderValueToDiopter(appSettings.focusVal, cameraInfo)
             optionsBuilder.setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
             optionsBuilder.setCaptureRequestOption(CaptureRequest.LENS_FOCUS_DISTANCE, diopter)
         }
 
         return optionsBuilder.build()
+    }
+
+    @OptIn(ExperimentalCamera2Interop::class)
+    private fun buildXpanAeRegions(
+        cameraInfo: Camera2CameraInfo
+    ): Array<MeteringRectangle>? {
+        val maxRegionCount = cameraInfo.getCameraCharacteristic(
+            CameraCharacteristics.CONTROL_MAX_REGIONS_AE
+        ) ?: 0
+        val activeArray = cameraInfo.getCameraCharacteristic(
+            CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE
+        ) ?: return null
+        val normalizedRegions = XpanMeteringRegionModel.regionsFor(
+            appSettings.xpanMeteringMode,
+            maxRegionCount
+        )
+        if (normalizedRegions.isEmpty()) {
+            Log.w("CameraManager", "Custom AE metering regions are not supported on this device")
+            return null
+        }
+        val meteringFrame = calculateXpanMeteringFrame(activeArray)
+
+        return normalizedRegions.map { region ->
+            MeteringRectangle(
+                normalizedRegionToSensorRect(region, meteringFrame),
+                region.weight.coerceIn(
+                    MeteringRectangle.METERING_WEIGHT_MIN,
+                    MeteringRectangle.METERING_WEIGHT_MAX
+                )
+            )
+        }.toTypedArray()
+    }
+
+    private fun calculateXpanMeteringFrame(activeArray: Rect): Rect {
+        val maxZoom = camera?.cameraInfo?.zoomState?.value?.maxZoomRatio ?: 1f
+        val zoomRatio = (appSettings.focalLength / 24f).coerceIn(1f, maxZoom)
+        val zoomWidth = (activeArray.width() / zoomRatio).roundToInt().coerceAtLeast(1)
+        val zoomHeight = (activeArray.height() / zoomRatio).roundToInt().coerceAtLeast(1)
+        val zoomLeft = activeArray.left + (activeArray.width() - zoomWidth) / 2
+        val zoomTop = activeArray.top + (activeArray.height() - zoomHeight) / 2
+
+        val zoomAspectRatio = zoomWidth.toFloat() / zoomHeight.toFloat()
+        val frameWidth: Int
+        val frameHeight: Int
+        if (zoomAspectRatio > XpanMode.ASPECT_RATIO) {
+            frameHeight = zoomHeight
+            frameWidth = (frameHeight * XpanMode.ASPECT_RATIO).roundToInt()
+        } else {
+            frameWidth = zoomWidth
+            frameHeight = (frameWidth / XpanMode.ASPECT_RATIO).roundToInt()
+        }
+        val frameLeft = zoomLeft + (zoomWidth - frameWidth) / 2
+        val frameTop = zoomTop + (zoomHeight - frameHeight) / 2
+        return Rect(
+            frameLeft,
+            frameTop,
+            frameLeft + frameWidth,
+            frameTop + frameHeight
+        )
+    }
+
+    private fun normalizedRegionToSensorRect(
+        region: NormalizedMeteringRegion,
+        activeArray: Rect
+    ): Rect {
+        val left = (
+            activeArray.left + activeArray.width() * region.left.coerceIn(0f, 1f)
+            ).roundToInt().coerceIn(activeArray.left, activeArray.right - 1)
+        val top = (
+            activeArray.top + activeArray.height() * region.top.coerceIn(0f, 1f)
+            ).roundToInt().coerceIn(activeArray.top, activeArray.bottom - 1)
+        val right = (
+            activeArray.left + activeArray.width() * region.right.coerceIn(0f, 1f)
+            ).roundToInt().coerceIn(left + 1, activeArray.right)
+        val bottom = (
+            activeArray.top + activeArray.height() * region.bottom.coerceIn(0f, 1f)
+            ).roundToInt().coerceIn(top + 1, activeArray.bottom)
+        return Rect(left, top, right, bottom)
     }
 
     private fun createWdrCurve(): android.hardware.camera2.params.TonemapCurve {
@@ -447,6 +578,24 @@ class CameraManager(
         applyCaptureRequestOptions()
     }
 
+    @OptIn(ExperimentalCamera2Interop::class)
+    fun setXpanMeteringMode(mode: XpanMeteringMode): Boolean {
+        appSettings.xpanMeteringMode = mode
+        // A new metering pattern needs a fresh AE convergence pass.
+        appSettings.isAeLocked = false
+        applyCaptureRequestOptions()
+
+        val cam = camera ?: return false
+        val cameraInfo = Camera2CameraInfo.from(cam.cameraInfo)
+        val maxRegionCount = cameraInfo.getCameraCharacteristic(
+            CameraCharacteristics.CONTROL_MAX_REGIONS_AE
+        ) ?: 0
+        val activeArray = cameraInfo.getCameraCharacteristic(
+            CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE
+        )
+        return maxRegionCount > 0 && activeArray != null
+    }
+
     fun setAfLocked(locked: Boolean) {
         val cam = camera
         if (!locked) {
@@ -456,7 +605,11 @@ class CameraManager(
             return
         }
 
-        if (appSettings.focusMode != FocusMode.AUTO) {
+        if (XpanMode.effectiveFocusMode(
+                appSettings.isXpanMode,
+                appSettings.focusMode
+            ) != FocusMode.AUTO
+        ) {
             Log.w("CameraManager", "AF lock requires AUTO focus mode")
             appSettings.isAfLocked = false
             return
@@ -490,10 +643,12 @@ class CameraManager(
                     Log.d("CameraManager", "Center autofocus for AF lock completed, success=$success")
                     if (!success) {
                         pendingAfLockAfterFocus = false
+                        activity.runOnUiThread { onAfLockStateChanged() }
                     }
                 } catch (e: Exception) {
                     pendingAfLockAfterFocus = false
                     Log.w("CameraManager", "Center autofocus for AF lock failed", e)
+                    activity.runOnUiThread { onAfLockStateChanged() }
                 }
             },
             ContextCompat.getMainExecutor(activity)
@@ -502,7 +657,7 @@ class CameraManager(
 
     @OptIn(ExperimentalCamera2Interop::class)
     fun applyFocusMode() {
-        when (appSettings.focusMode) {
+        when (XpanMode.effectiveFocusMode(appSettings.isXpanMode, appSettings.focusMode)) {
             FocusMode.AUTO -> enableAutoFocus()
             FocusMode.MANUAL -> applyCaptureRequestOptions()
         }
@@ -670,6 +825,7 @@ class CameraManager(
                     }
                 )
                 latestCaptureMetadata = metadata
+                dispatchXpanTelemetry()
                 val captureIntent = request.get(CaptureRequest.CONTROL_CAPTURE_INTENT)
                 if (captureIntent == CaptureRequest.CONTROL_CAPTURE_INTENT_STILL_CAPTURE ||
                     captureIntent == CaptureRequest.CONTROL_CAPTURE_INTENT_ZERO_SHUTTER_LAG
@@ -694,9 +850,77 @@ class CameraManager(
                         appSettings.isAfLocked = true
                         activity.runOnUiThread {
                             applyCaptureRequestOptions()
+                            onAfLockStateChanged()
                         }
                     }
                 }
+            }
+        }
+    }
+
+    fun setEquivalentFocalLength(focalLength: Int) {
+        appSettings.focalLength = focalLength.coerceIn(24, 50)
+        applyZoomRatio()
+        if (appSettings.isXpanMode) {
+            applyCaptureRequestOptions()
+        }
+    }
+
+    private fun applyZoomRatio() {
+        val cam = camera ?: return
+        val desiredZoom = if (appSettings.isXpanMode) {
+            appSettings.focalLength / 24f
+        } else {
+            1f
+        }
+        val maxZoom = cam.cameraInfo.zoomState.value?.maxZoomRatio ?: 1f
+        cam.cameraControl.setZoomRatio(desiredZoom.coerceIn(1f, maxZoom))
+    }
+
+    private fun calculateLumaHistogram(image: ImageProxy): FloatArray {
+        val bins = IntArray(64)
+        val plane = image.planes.firstOrNull() ?: return FloatArray(64)
+        val buffer = plane.buffer.duplicate()
+        val rowStride = plane.rowStride
+        val pixelStride = plane.pixelStride
+        val sampleStep = 4
+        var sampledPixels = 0
+
+        var y = 0
+        while (y < image.height) {
+            var x = 0
+            while (x < image.width) {
+                val index = y * rowStride + x * pixelStride
+                if (index < buffer.limit()) {
+                    val luminance = buffer.get(index).toInt() and 0xFF
+                    bins[(luminance * bins.size / 256).coerceAtMost(bins.lastIndex)] += 1
+                    sampledPixels += 1
+                }
+                x += sampleStep
+            }
+            y += sampleStep
+        }
+        if (sampledPixels == 0) return FloatArray(bins.size)
+        val peak = bins.maxOrNull()?.coerceAtLeast(1) ?: 1
+        return FloatArray(bins.size) { index ->
+            sqrt(bins[index].toFloat() / peak.toFloat())
+        }
+    }
+
+    private fun dispatchXpanTelemetry() {
+        if (!appSettings.isXpanMode) return
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastTelemetryDispatchElapsedMs < TELEMETRY_INTERVAL_MS) return
+        lastTelemetryDispatchElapsedMs = now
+        val metadata = latestCaptureMetadata
+        val telemetry = XpanTelemetry(
+            histogram = latestHistogram,
+            iso = metadata?.iso,
+            exposureTimeNs = metadata?.exposureTimeNs
+        )
+        activity.runOnUiThread {
+            if (appSettings.isXpanMode) {
+                onXpanTelemetryUpdated(telemetry)
             }
         }
     }
@@ -735,5 +959,6 @@ class CameraManager(
         private const val CAPTURE_PERF_TAG = "C1CapturePerf"
         private const val MAX_CAPTURES_IN_FLIGHT = 2
         private const val EXECUTOR_SHUTDOWN_TIMEOUT_SECONDS = 5L
+        private const val TELEMETRY_INTERVAL_MS = 120L
     }
 }

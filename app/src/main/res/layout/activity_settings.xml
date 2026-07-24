@@ -85,6 +85,45 @@
 
                 <TextView
                     style="@style/C1_SettingsSectionLabel"
+                    android:text="CAMERA MODE" />
+
+                <com.google.android.material.card.MaterialCardView
+                    style="@style/C1_SettingsCard">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical">
+
+                        <LinearLayout
+                            style="@style/C1_SettingsSwitchRow"
+                            android:minHeight="88dp">
+
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:orientation="vertical">
+
+                                <TextView
+                                    style="@style/C1_SettingsTitle"
+                                    android:text="XPAN mode" />
+
+                                <TextView
+                                    style="@style/C1_SettingsSubtitle"
+                                    android:maxWidth="260dp"
+                                    android:text="65:24 film-back UI · continuous AF · fixed panoramic frame" />
+                            </LinearLayout>
+
+                            <com.google.android.material.materialswitch.MaterialSwitch
+                                android:id="@+id/xpan_mode_switch"
+                                style="@style/C1_SettingsSwitch" />
+                        </LinearLayout>
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <TextView
+                    style="@style/C1_SettingsSectionLabel"
                     android:text="FRAMING &amp; LENS" />
 
                 <com.google.android.material.card.MaterialCardView
@@ -221,6 +260,38 @@
                                 android:ellipsize="end"
                                 android:singleLine="true"
                                 tools:text="None" />
+
+                            <ImageView style="@style/C1_SettingsChevron" />
+                        </LinearLayout>
+
+                        <View style="@style/C1_SettingsDivider" />
+
+                        <LinearLayout
+                            android:id="@+id/tone_map_row"
+                            style="@style/C1_SettingsRow">
+
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:orientation="vertical">
+
+                                <TextView
+                                    style="@style/C1_SettingsTitle"
+                                    android:text="Tone mapping" />
+
+                                <TextView
+                                    style="@style/C1_SettingsSubtitle"
+                                    android:text="Display transform before the creative LUT" />
+                            </LinearLayout>
+
+                            <TextView
+                                android:id="@+id/tone_map_value"
+                                style="@style/C1_SettingsValue"
+                                android:maxWidth="112dp"
+                                android:ellipsize="end"
+                                android:singleLine="true"
+                                tools:text="ACES Filmic" />
 
                             <ImageView style="@style/C1_SettingsChevron" />
                         </LinearLayout>
@@ -599,9 +670,9 @@
                 android:layout_width="match_parent"
                 android:layout_height="54dp"
                 android:layout_marginTop="22dp"
+                android:background="@drawable/bg_metal_button_active"
                 android:text="Apply ratio"
                 android:textColor="@color/cam_bg_end"
-                app:backgroundTint="@color/cam_accent"
                 app:cornerRadius="18dp" />
         </LinearLayout>
     </LinearLayout>
