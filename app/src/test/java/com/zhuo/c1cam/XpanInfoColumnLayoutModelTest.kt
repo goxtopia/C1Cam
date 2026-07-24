@@ -25,7 +25,7 @@ class XpanInfoColumnLayoutModelTest {
         val histogramHeight =
             layout.column.histogramBottom - layout.column.histogramTop
         assertEquals(218f / 112f, columnWidth.toFloat() / lcdHeight, 0.02f)
-        assertTrue(columnWidth.toFloat() / histogramHeight >= 3f)
+        assertEquals(2.8f, columnWidth.toFloat() / histogramHeight, 0.03f)
         assertTrue(
             columnWidth >
                 lcdHeight

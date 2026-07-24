@@ -154,6 +154,7 @@ class MainActivity : AppCompatActivity() {
 
         appSettings = AppSettings(this)
         imageProcessor = ImageProcessor(this)
+        applyXpanInstrumentTheme()
         
         appSettings.lutName?.let { savedKey ->
             val normalizedKey = normalizeLutStorageKey(savedKey)
@@ -440,6 +441,7 @@ class MainActivity : AppCompatActivity() {
         xpanFocalSlider.value = appSettings.focalLength.coerceIn(24, 50).toFloat()
         updateXpanFocalValue()
         updateXpanMeteringButtonUi()
+        applyXpanInstrumentTheme()
         overlay.isOverlayVisible = !appSettings.isXpanMode && !appSettings.isCropModeOff
         updateFocusModeUi()
         updateLockButtonsUi()
@@ -452,6 +454,11 @@ class MainActivity : AppCompatActivity() {
         cameraManager.updatePreviewAnalysisMode()
         updateCropFrameGuideUi()
         appSettings.save(overlay.getNormalizedPoints())
+    }
+
+    private fun applyXpanInstrumentTheme() {
+        xpanDashboard.setInstrumentTheme(appSettings.xpanInstrumentTheme)
+        xpanProcessingPanel.setInstrumentTheme(appSettings.xpanInstrumentTheme)
     }
 
     private fun updateFocusModeUi() {

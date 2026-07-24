@@ -39,6 +39,13 @@ class XpanProcessingPanelView @JvmOverloads constructor(
     private var exposureTimeNs: Long? = null
     private var needlePosition = IDLE_NEEDLE_POSITION
     private var needleAnimator: ValueAnimator? = null
+    private var instrumentTheme = XpanInstrumentTheme.GREEN
+
+    fun setInstrumentTheme(theme: XpanInstrumentTheme) {
+        if (instrumentTheme == theme) return
+        instrumentTheme = theme
+        invalidate()
+    }
 
     fun updateStatus(newStatus: CaptureProcessingStatus) {
         status = newStatus
@@ -114,16 +121,16 @@ class XpanProcessingPanelView @JvmOverloads constructor(
             lcd.right,
             lcd.bottom,
             intArrayOf(
-                Color.rgb(187, 194, 142),
-                Color.rgb(157, 166, 114),
-                Color.rgb(134, 144, 95)
+                instrumentTheme.screenTop,
+                instrumentTheme.screenMiddle,
+                instrumentTheme.screenBottom
             ),
             null,
             Shader.TileMode.CLAMP
         )
         canvas.drawRoundRect(lcd, 2.5f * unit, 2.5f * unit, fillPaint)
         fillPaint.shader = null
-        linePaint.color = Color.argb(220, 28, 34, 25)
+        linePaint.color = instrumentTheme.inkWithAlpha(220)
         linePaint.strokeWidth = 1.2f * unit
         canvas.drawRoundRect(lcd, 2.5f * unit, 2.5f * unit, linePaint)
 
@@ -175,7 +182,7 @@ class XpanProcessingPanelView @JvmOverloads constructor(
     }
 
     private fun drawExposureReadout(canvas: Canvas, lcd: RectF, unit: Float) {
-        val ink = LCD_INK
+        val ink = instrumentTheme.ink
         val center = lcd.centerX()
         textPaint.textAlign = Paint.Align.LEFT
         textPaint.color = ink
@@ -200,7 +207,7 @@ class XpanProcessingPanelView @JvmOverloads constructor(
             textPaint
         )
 
-        linePaint.color = Color.argb(100, 35, 48, 31)
+        linePaint.color = instrumentTheme.inkWithAlpha(100)
         linePaint.strokeWidth = 0.65f * unit
         canvas.drawLine(
             lcd.left + 5f * unit,
@@ -212,9 +219,9 @@ class XpanProcessingPanelView @JvmOverloads constructor(
     }
 
     private fun drawQueueReadout(canvas: Canvas, lcd: RectF, unit: Float) {
-        val ghostInk = Color.argb(35, 35, 48, 31)
+        val ghostInk = instrumentTheme.inkWithAlpha(35)
         textPaint.textAlign = Paint.Align.LEFT
-        textPaint.color = LCD_INK
+        textPaint.color = instrumentTheme.ink
         textPaint.textSize = 6.1f * unit
         textPaint.letterSpacing = 0.14f
         canvas.drawText("BUFFER", lcd.left + 6f * unit, lcd.top + 36f * unit, textPaint)
@@ -260,7 +267,7 @@ class XpanProcessingPanelView @JvmOverloads constructor(
             top,
             digitWidth,
             digitHeight,
-            LCD_INK
+            instrumentTheme.ink
         )
         drawSevenSegmentDigit(
             canvas,
@@ -269,16 +276,16 @@ class XpanProcessingPanelView @JvmOverloads constructor(
             top,
             digitWidth,
             digitHeight,
-            LCD_INK
+            instrumentTheme.ink
         )
 
         textPaint.textAlign = Paint.Align.LEFT
-        textPaint.color = LCD_INK
+        textPaint.color = instrumentTheme.ink
         textPaint.textSize = 6f * unit
         textPaint.letterSpacing = 0.11f
         canvas.drawText("PENDING", lcd.left + 6f * unit, top + 13f * unit, textPaint)
 
-        linePaint.color = Color.argb(100, 35, 48, 31)
+        linePaint.color = instrumentTheme.inkWithAlpha(100)
         linePaint.strokeWidth = 0.65f * unit
         canvas.drawLine(
             lcd.left + 5f * unit,
@@ -301,13 +308,13 @@ class XpanProcessingPanelView @JvmOverloads constructor(
             CaptureProcessingStage.SAVING -> "SAVING"
             null -> "STANDBY"
         }
-        textPaint.color = LCD_INK
+        textPaint.color = instrumentTheme.ink
         textPaint.textSize = 5.4f * unit
         textPaint.letterSpacing = 0.1f
         textPaint.textAlign = Paint.Align.CENTER
         canvas.drawText(stageText, lcd.centerX(), lcd.top + 70f * unit, textPaint)
 
-        linePaint.color = Color.argb(180, 35, 48, 31)
+        linePaint.color = instrumentTheme.inkWithAlpha(180)
         linePaint.strokeWidth = 0.8f * unit
         canvas.drawLine(left, baselineY, right, baselineY, linePaint)
         tickXs.forEach { x ->
@@ -330,13 +337,13 @@ class XpanProcessingPanelView @JvmOverloads constructor(
         val pivotY = baselineY - 1.5f * unit
         val targetX = left + (right - left) * needlePosition.coerceIn(0f, 1f)
         val targetY = baselineY - 10f * unit
-        linePaint.color = LCD_INK
+        linePaint.color = instrumentTheme.ink
         linePaint.strokeWidth = 1.5f * unit
         linePaint.strokeCap = Paint.Cap.ROUND
         canvas.drawLine(pivotX, pivotY, targetX, targetY, linePaint)
-        fillPaint.color = LCD_INK
+        fillPaint.color = instrumentTheme.ink
         canvas.drawCircle(pivotX, pivotY, 2.1f * unit, fillPaint)
-        fillPaint.color = Color.rgb(154, 163, 111)
+        fillPaint.color = instrumentTheme.screenMiddle
         canvas.drawCircle(pivotX, pivotY, 0.8f * unit, fillPaint)
         linePaint.strokeCap = Paint.Cap.SQUARE
     }
@@ -405,7 +412,6 @@ class XpanProcessingPanelView @JvmOverloads constructor(
         private const val BASE_WIDTH = 218f
         private const val BASE_HEIGHT = 112f
         private const val IDLE_NEEDLE_POSITION = 0f
-        private val LCD_INK = Color.rgb(35, 48, 31)
         private val DIGIT_SEGMENTS = arrayOf(
             booleanArrayOf(true, true, true, true, true, true, false),
             booleanArrayOf(false, true, true, false, false, false, false),

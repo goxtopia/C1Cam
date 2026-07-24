@@ -119,6 +119,35 @@
                                 android:id="@+id/xpan_mode_switch"
                                 style="@style/C1_SettingsSwitch" />
                         </LinearLayout>
+
+                        <View style="@style/C1_SettingsDivider" />
+
+                        <LinearLayout
+                            android:id="@+id/xpan_instrument_theme_row"
+                            style="@style/C1_SettingsRow">
+
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:orientation="vertical">
+
+                                <TextView
+                                    style="@style/C1_SettingsTitle"
+                                    android:text="XPAN instrument screen" />
+
+                                <TextView
+                                    style="@style/C1_SettingsSubtitle"
+                                    android:text="Histogram and processing LCD color" />
+                            </LinearLayout>
+
+                            <TextView
+                                android:id="@+id/xpan_instrument_theme_value"
+                                style="@style/C1_SettingsValue"
+                                tools:text="Phosphor green" />
+
+                            <ImageView style="@style/C1_SettingsChevron" />
+                        </LinearLayout>
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
 

@@ -39,6 +39,7 @@ class XpanDashboardView @JvmOverloads constructor(
         typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
     }
     private val histogramPath = Path()
+    private val histogramTracePath = Path()
     private val backgroundPaint = Paint()
 
     private var isActive = false
@@ -49,6 +50,7 @@ class XpanDashboardView @JvmOverloads constructor(
     private var contentRotationDegrees = 0f
     private var displayRotation = Surface.ROTATION_0
     private var histogram = FloatArray(64)
+    private var instrumentTheme = XpanInstrumentTheme.GREEN
 
     fun setActive(active: Boolean) {
         if (isActive == active) return
@@ -63,6 +65,12 @@ class XpanDashboardView @JvmOverloads constructor(
 
     fun updateTelemetry(telemetry: XpanTelemetry) {
         histogram = telemetry.histogram.copyOf()
+        postInvalidateOnAnimation()
+    }
+
+    fun setInstrumentTheme(theme: XpanInstrumentTheme) {
+        if (instrumentTheme == theme) return
+        instrumentTheme = theme
         postInvalidateOnAnimation()
     }
 
@@ -255,39 +263,120 @@ class XpanDashboardView @JvmOverloads constructor(
         )
         canvas.save()
         applyFixedLandscapeTransform(canvas, layout.rotationDegrees)
-        fillPaint.color = Color.argb(160, 16, 19, 17)
-        canvas.drawRoundRect(rect, dp(12f), dp(12f), fillPaint)
-        linePaint.color = Color.argb(52, 246, 247, 248)
+        fillPaint.shader = LinearGradient(
+            rect.left,
+            rect.top,
+            rect.left,
+            rect.bottom,
+            intArrayOf(
+                Color.rgb(69, 73, 69),
+                Color.rgb(25, 28, 27),
+                Color.rgb(8, 10, 9)
+            ),
+            null,
+            Shader.TileMode.CLAMP
+        )
+        canvas.drawRoundRect(rect, dp(9f), dp(9f), fillPaint)
+        fillPaint.shader = null
+        linePaint.color = Color.argb(150, 190, 196, 188)
         linePaint.strokeWidth = dp(1f)
-        canvas.drawRoundRect(rect, dp(12f), dp(12f), linePaint)
+        canvas.drawRoundRect(rect, dp(9f), dp(9f), linePaint)
+
+        val screen = RectF(
+            rect.left + dp(5f),
+            rect.top + dp(5f),
+            rect.right - dp(5f),
+            rect.bottom - dp(5f)
+        )
+        fillPaint.shader = LinearGradient(
+            screen.left,
+            screen.top,
+            screen.right,
+            screen.bottom,
+            intArrayOf(
+                instrumentTheme.screenTop,
+                instrumentTheme.screenMiddle,
+                instrumentTheme.screenBottom
+            ),
+            null,
+            Shader.TileMode.CLAMP
+        )
+        canvas.drawRoundRect(screen, dp(4f), dp(4f), fillPaint)
+        fillPaint.shader = null
+        linePaint.color = instrumentTheme.inkWithAlpha(210)
+        linePaint.strokeWidth = dp(0.9f)
+        canvas.drawRoundRect(screen, dp(4f), dp(4f), linePaint)
 
         textPaint.textAlign = Paint.Align.LEFT
-        textPaint.color = Color.argb(155, 246, 247, 248)
-        textPaint.textSize = sp(8f)
-        textPaint.letterSpacing = 0.12f
-        canvas.drawText("LUMA HISTOGRAM", rect.left + dp(12f), rect.top + dp(17f), textPaint)
+        textPaint.color = instrumentTheme.ink
+        textPaint.textSize = sp(7.5f)
+        textPaint.letterSpacing = 0.16f
+        canvas.drawText("LUMA SCOPE", screen.left + dp(9f), screen.top + dp(15f), textPaint)
+        textPaint.textAlign = Paint.Align.RIGHT
+        textPaint.textSize = sp(6.5f)
+        textPaint.letterSpacing = 0.08f
+        canvas.drawText("Y  0—255", screen.right - dp(9f), screen.top + dp(15f), textPaint)
 
         val graph = RectF(
-            rect.left + dp(12f),
-            rect.top + dp(26f),
-            rect.right - dp(12f),
-            rect.bottom - dp(10f)
+            screen.left + dp(9f),
+            screen.top + dp(23f),
+            screen.right - dp(9f),
+            screen.bottom - dp(10f)
         )
+        linePaint.strokeCap = Paint.Cap.SQUARE
+        linePaint.strokeWidth = dp(0.55f)
+        linePaint.color = instrumentTheme.inkWithAlpha(48)
+        for (division in 0..8) {
+            val x = graph.left + graph.width() * division / 8f
+            canvas.drawLine(x, graph.top, x, graph.bottom, linePaint)
+        }
+        for (division in 0..4) {
+            val y = graph.top + graph.height() * division / 4f
+            canvas.drawLine(graph.left, y, graph.right, y, linePaint)
+        }
+        linePaint.color = instrumentTheme.inkWithAlpha(105)
+        linePaint.strokeWidth = dp(0.8f)
+        canvas.drawLine(graph.centerX(), graph.top, graph.centerX(), graph.bottom, linePaint)
+        canvas.drawLine(graph.left, graph.centerY(), graph.right, graph.centerY(), linePaint)
+
+        linePaint.color = instrumentTheme.inkWithAlpha(155)
+        linePaint.strokeWidth = dp(0.8f)
+        for (division in 0..16) {
+            val x = graph.left + graph.width() * division / 16f
+            val tickHeight = if (division % 4 == 0) dp(4f) else dp(2.2f)
+            canvas.drawLine(x, graph.bottom - tickHeight, x, graph.bottom, linePaint)
+        }
+
         histogramPath.reset()
         histogramPath.moveTo(graph.left, graph.bottom)
+        histogramTracePath.reset()
         val values = histogram
         for (index in values.indices) {
             val px = graph.left + graph.width() * index / (values.size - 1).coerceAtLeast(1)
             val py = graph.bottom - graph.height() * values[index].coerceIn(0f, 1f)
             histogramPath.lineTo(px, py)
+            if (index == 0) {
+                histogramTracePath.moveTo(px, py)
+            } else {
+                histogramTracePath.lineTo(px, py)
+            }
         }
         histogramPath.lineTo(graph.right, graph.bottom)
         histogramPath.close()
-        fillPaint.color = Color.argb(115, 214, 255, 66)
+        fillPaint.color = instrumentTheme.inkWithAlpha(72)
         canvas.drawPath(histogramPath, fillPaint)
-        linePaint.color = Color.rgb(214, 255, 66)
-        linePaint.strokeWidth = dp(1.4f)
-        canvas.drawPath(histogramPath, linePaint)
+        linePaint.color = instrumentTheme.ink
+        linePaint.strokeWidth = dp(1.55f)
+        canvas.drawPath(histogramTracePath, linePaint)
+
+        val cornerLength = dp(7f)
+        linePaint.color = instrumentTheme.inkWithAlpha(190)
+        linePaint.strokeWidth = dp(1f)
+        canvas.drawLine(graph.left, graph.top, graph.left + cornerLength, graph.top, linePaint)
+        canvas.drawLine(graph.left, graph.top, graph.left, graph.top + cornerLength, linePaint)
+        canvas.drawLine(graph.right, graph.top, graph.right - cornerLength, graph.top, linePaint)
+        canvas.drawLine(graph.right, graph.top, graph.right, graph.top + cornerLength, linePaint)
+        linePaint.strokeCap = Paint.Cap.ROUND
         canvas.restore()
     }
 

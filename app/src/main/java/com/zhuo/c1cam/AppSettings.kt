@@ -29,6 +29,7 @@ class AppSettings(private val context: Context) {
     var jpegQuality: Int = JpegQuality.DEFAULT
     var isXpanMode: Boolean = false
     var xpanMeteringMode: XpanMeteringMode = XpanMeteringMode.CENTER_WEIGHTED
+    var xpanInstrumentTheme: XpanInstrumentTheme = XpanInstrumentTheme.GREEN
     var inactivityTimeoutMinutes: Int = InactivityTimeout.DEFAULT_MINUTES
     var toneMapPreset: ToneMapPreset = ToneMapPreset.NONE
     var savedPoints: List<PointF>? = null
@@ -73,6 +74,9 @@ class AppSettings(private val context: Context) {
         isXpanMode = prefs.getBoolean(KEY_XPAN_MODE, false)
         xpanMeteringMode = XpanMeteringMode.fromStorageValue(
             prefs.getString(KEY_XPAN_METERING_MODE, XpanMeteringMode.CENTER_WEIGHTED.storageValue)
+        )
+        xpanInstrumentTheme = XpanInstrumentTheme.fromStorageValue(
+            prefs.getString(KEY_XPAN_INSTRUMENT_THEME, XpanInstrumentTheme.GREEN.storageValue)
         )
         inactivityTimeoutMinutes = InactivityTimeout.sanitize(
             prefs.getInt(KEY_INACTIVITY_TIMEOUT_MINUTES, InactivityTimeout.DEFAULT_MINUTES)
@@ -122,6 +126,7 @@ class AppSettings(private val context: Context) {
         editor.putInt(KEY_JPEG_QUALITY, jpegQuality)
         editor.putBoolean(KEY_XPAN_MODE, isXpanMode)
         editor.putString(KEY_XPAN_METERING_MODE, xpanMeteringMode.storageValue)
+        editor.putString(KEY_XPAN_INSTRUMENT_THEME, xpanInstrumentTheme.storageValue)
         editor.putInt(KEY_INACTIVITY_TIMEOUT_MINUTES, inactivityTimeoutMinutes)
         editor.putString(KEY_TONE_MAP_PRESET, toneMapPreset.storageValue)
 
@@ -163,6 +168,7 @@ class AppSettings(private val context: Context) {
         private const val KEY_JPEG_QUALITY = "jpeg_quality"
         private const val KEY_XPAN_MODE = "xpan_mode"
         private const val KEY_XPAN_METERING_MODE = "xpan_metering_mode"
+        private const val KEY_XPAN_INSTRUMENT_THEME = "xpan_instrument_theme"
         private const val KEY_INACTIVITY_TIMEOUT_MINUTES = "inactivity_timeout_minutes"
         private const val KEY_TONE_MAP_PRESET = "tone_map_preset"
     }

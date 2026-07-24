@@ -92,7 +92,7 @@ data class XpanFixedLandscapeInfoLayout(
 
 object XpanInfoColumnLayoutModel {
     private const val LCD_ASPECT_RATIO = 218f / 112f
-    private const val HISTOGRAM_ASPECT_RATIO = 3.2f
+    private const val HISTOGRAM_ASPECT_RATIO = 2.8f
 
     fun calculate(
         containerWidth: Int,
