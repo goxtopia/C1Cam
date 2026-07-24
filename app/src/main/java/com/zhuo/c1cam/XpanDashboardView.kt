@@ -156,18 +156,27 @@ class XpanDashboardView @JvmOverloads constructor(
             drawScheme2Inscription(canvas)
             return
         }
-        val landscape = width > height
-        val cx = if (landscape) width * 0.56f else width * 0.31f
-        val cy = if (landscape) height * 0.16f else dp(24f)
+        drawScheme1Inscription(canvas)
+    }
+
+    private fun drawScheme1Inscription(canvas: Canvas) {
+        val layout = instrumentLayout()
+        val left = dp(20f)
+        val baseline = layout.logicalHeight * 0.78f
+        canvas.save()
+        applyFixedLandscapeTransform(canvas, layout.rotationDegrees)
+
         textPaint.color = Color.rgb(214, 255, 66)
-        textPaint.textSize = sp(10f)
-        textPaint.letterSpacing = 0.14f
-        textPaint.textAlign = Paint.Align.CENTER
-        canvas.drawText("XPAN  ·  65:24", cx, cy, textPaint)
+        textPaint.textSize = sp(11f)
+        textPaint.letterSpacing = 0.15f
+        textPaint.textAlign = Paint.Align.LEFT
+        canvas.drawText("XPAN  ·  65:24", left, baseline, textPaint)
 
         textPaint.color = Color.argb(150, 246, 247, 248)
-        textPaint.textSize = sp(8f)
-        canvas.drawText("PANORAMIC FILM BACK", cx, cy + dp(17f), textPaint)
+        textPaint.textSize = sp(8.5f)
+        textPaint.letterSpacing = 0.15f
+        canvas.drawText("PANORAMIC FILM BACK", left, baseline + dp(19f), textPaint)
+        canvas.restore()
     }
 
     private fun drawScheme2Inscription(canvas: Canvas) {

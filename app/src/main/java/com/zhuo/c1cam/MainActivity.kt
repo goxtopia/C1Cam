@@ -667,13 +667,20 @@ class MainActivity : AppCompatActivity() {
                     isFullViewfinder -> Gravity.TOP or Gravity.CENTER_HORIZONTAL
                     else -> Gravity.TOP or Gravity.START
                 }
+                val verticalFrameEndMargin = if (
+                    isVerticalFrame && !isFullViewfinder
+                ) {
+                    dp(28)
+                } else {
+                    dp(16)
+                }
                 if (isFullViewfinder && !isVerticalFrame) {
                     params.setMargins(0, dp(18), 0, 0)
                 } else {
                     params.setMargins(
                         if (isVerticalFrame) 0 else dp(16),
                         dp(18),
-                        if (isVerticalFrame) dp(16) else 0,
+                        if (isVerticalFrame) verticalFrameEndMargin else 0,
                         0
                     )
                 }
@@ -695,7 +702,7 @@ class MainActivity : AppCompatActivity() {
                         else -> dp(27)
                     },
                     dp(29),
-                    if (isVerticalFrame) dp(27) else 0,
+                    if (isVerticalFrame) verticalFrameEndMargin + dp(11) else 0,
                     0
                 )
                 xpanViewfinderLabel.layoutParams = labelParams
