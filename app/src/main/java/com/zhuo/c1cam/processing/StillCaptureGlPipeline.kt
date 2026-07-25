@@ -45,11 +45,15 @@ object StillCaptureGlPipeline {
     private var yTextureLocation = -1
     private var uTextureLocation = -1
     private var vTextureLocation = -1
+    private var lumaSizeLocation = -1
     private var chromaSizeLocation = -1
     private var denoiseEnabledLocation = -1
     private var radiusLocation = -1
     private var sigmaSpatialLocation = -1
     private var sigmaRangeLocation = -1
+    private var sigmaChromaLocation = -1
+    private var chromaGuidanceEnabledLocation = -1
+    private var filteredLumaGuideEnabledLocation = -1
     private var darkThresholdLocation = -1
     private var filterStrengthLocation = -1
     private var hasLutLocation = -1
@@ -183,6 +187,11 @@ object StillCaptureGlPipeline {
                 0
             )
             GLES30.glUniform2f(
+                lumaSizeLocation,
+                rawWidth.toFloat(),
+                rawHeight.toFloat()
+            )
+            GLES30.glUniform2f(
                 chromaSizeLocation,
                 chromaWidth.toFloat(),
                 chromaHeight.toFloat()
@@ -193,6 +202,15 @@ object StillCaptureGlPipeline {
             GLES30.glUniform1i(radiusLocation, denoise?.radius ?: 0)
             GLES30.glUniform1f(sigmaSpatialLocation, denoise?.sigmaSpatial ?: 1f)
             GLES30.glUniform1f(sigmaRangeLocation, denoise?.sigmaRange ?: 1f)
+            GLES30.glUniform1f(sigmaChromaLocation, denoise?.sigmaChroma ?: 10f)
+            GLES30.glUniform1i(
+                chromaGuidanceEnabledLocation,
+                if (denoise?.useChromaGuidance == true) 1 else 0
+            )
+            GLES30.glUniform1i(
+                filteredLumaGuideEnabledLocation,
+                if (denoise?.useFilteredLumaGuide == true) 1 else 0
+            )
             GLES30.glUniform1f(darkThresholdLocation, denoise?.darkThreshold ?: 0f)
             GLES30.glUniform1f(filterStrengthLocation, denoise?.filterStrength ?: 0f)
 
@@ -532,10 +550,23 @@ object StillCaptureGlPipeline {
     private fun denoiseParameters(mode: ChromaDenoiseMode): DenoiseParameters? {
         return when (mode) {
             ChromaDenoiseMode.OFF -> null
-            ChromaDenoiseMode.LOW -> DenoiseParameters(1, 1.2f, 0.04f, 0.10f, 0.45f)
-            ChromaDenoiseMode.MEDIUM -> DenoiseParameters(2, 2.0f, 0.07f, 0.16f, 0.72f)
-            ChromaDenoiseMode.HIGH -> DenoiseParameters(3, 3.0f, 0.10f, 0.22f, 1.0f)
-            ChromaDenoiseMode.AUTO -> error("AUTO must be resolved before rendering")
+            ChromaDenoiseMode.LOW ->
+                DenoiseParameters(1, 1.2f, 0.04f, 10f, false, false, 0.10f, 0.45f)
+            ChromaDenoiseMode.MEDIUM ->
+                DenoiseParameters(2, 2.0f, 0.07f, 10f, false, false, 0.16f, 0.72f)
+            ChromaDenoiseMode.HIGH ->
+                DenoiseParameters(3, 3.0f, 0.10f, 10f, false, false, 0.22f, 1.0f)
+            ChromaDenoiseMode.VERY_HIGH ->
+                DenoiseParameters(3, 3.6f, 0.075f, 0.12f, true, false, 0.30f, 1.0f)
+            ChromaDenoiseMode.VERY_HIGH_LUMA ->
+                DenoiseParameters(3, 3.6f, 0.075f, 10f, false, false, 0.30f, 1.0f)
+            ChromaDenoiseMode.XHIGH_LUMA ->
+                DenoiseParameters(3, 3.8f, 0.055f, 10f, false, true, 0.34f, 1.0f)
+            ChromaDenoiseMode.AUTO,
+            ChromaDenoiseMode.AUTO_HIGH,
+            ChromaDenoiseMode.AUTO_HIGH_LUMA,
+            ChromaDenoiseMode.AUTO_XHIGH_LUMA ->
+                error("Automatic mode must be resolved before rendering")
         }
     }
 
@@ -631,11 +662,17 @@ object StillCaptureGlPipeline {
         yTextureLocation = GLES30.glGetUniformLocation(program, "uY")
         uTextureLocation = GLES30.glGetUniformLocation(program, "uU")
         vTextureLocation = GLES30.glGetUniformLocation(program, "uV")
+        lumaSizeLocation = GLES30.glGetUniformLocation(program, "uLumaSize")
         chromaSizeLocation = GLES30.glGetUniformLocation(program, "uChromaSize")
         denoiseEnabledLocation = GLES30.glGetUniformLocation(program, "uDenoiseEnabled")
         radiusLocation = GLES30.glGetUniformLocation(program, "uRadius")
         sigmaSpatialLocation = GLES30.glGetUniformLocation(program, "uSigmaSpatial")
         sigmaRangeLocation = GLES30.glGetUniformLocation(program, "uSigmaRange")
+        sigmaChromaLocation = GLES30.glGetUniformLocation(program, "uSigmaChroma")
+        chromaGuidanceEnabledLocation =
+            GLES30.glGetUniformLocation(program, "uChromaGuidanceEnabled")
+        filteredLumaGuideEnabledLocation =
+            GLES30.glGetUniformLocation(program, "uFilteredLumaGuideEnabled")
         darkThresholdLocation = GLES30.glGetUniformLocation(program, "uDarkThreshold")
         filterStrengthLocation = GLES30.glGetUniformLocation(program, "uFilterStrength")
         hasLutLocation = GLES30.glGetUniformLocation(program, "uHasLut")
@@ -772,6 +809,9 @@ object StillCaptureGlPipeline {
         val radius: Int,
         val sigmaSpatial: Float,
         val sigmaRange: Float,
+        val sigmaChroma: Float,
+        val useChromaGuidance: Boolean,
+        val useFilteredLumaGuide: Boolean,
         val darkThreshold: Float,
         val filterStrength: Float
     )
@@ -797,12 +837,16 @@ object StillCaptureGlPipeline {
         uniform sampler2D uY;
         uniform sampler2D uU;
         uniform sampler2D uV;
+        uniform vec2 uLumaSize;
         uniform vec2 uChromaSize;
 
         uniform int uDenoiseEnabled;
         uniform int uRadius;
         uniform float uSigmaSpatial;
         uniform float uSigmaRange;
+        uniform float uSigmaChroma;
+        uniform int uChromaGuidanceEnabled;
+        uniform int uFilteredLumaGuideEnabled;
         uniform float uDarkThreshold;
         uniform float uFilterStrength;
 
@@ -825,6 +869,58 @@ object StillCaptureGlPipeline {
             );
         }
 
+        float lumaGuide(vec2 coord) {
+            float center = texture(uY, coord).r;
+            if (uFilteredLumaGuideEnabled == 0) {
+                return center;
+            }
+
+            vec2 texel = 1.0 / uLumaSize;
+            float left = texture(
+                uY,
+                clamp(coord - vec2(texel.x, 0.0), vec2(0.0), vec2(1.0))
+            ).r;
+            float right = texture(
+                uY,
+                clamp(coord + vec2(texel.x, 0.0), vec2(0.0), vec2(1.0))
+            ).r;
+            float up = texture(
+                uY,
+                clamp(coord - vec2(0.0, texel.y), vec2(0.0), vec2(1.0))
+            ).r;
+            float down = texture(
+                uY,
+                clamp(coord + vec2(0.0, texel.y), vec2(0.0), vec2(1.0))
+            ).r;
+
+            const float guideSigma = 0.075;
+            float denominator = 2.0 * guideSigma * guideSigma;
+            float differenceLeft = left - center;
+            float differenceRight = right - center;
+            float differenceUp = up - center;
+            float differenceDown = down - center;
+            float weightLeft = exp(-(differenceLeft * differenceLeft) / denominator);
+            float weightRight = exp(-(differenceRight * differenceRight) / denominator);
+            float weightUp = exp(-(differenceUp * differenceUp) / denominator);
+            float weightDown = exp(-(differenceDown * differenceDown) / denominator);
+            float weightSum = 1.0 + weightLeft + weightRight + weightUp + weightDown;
+            float robustMean = (
+                center +
+                left * weightLeft +
+                right * weightRight +
+                up * weightUp +
+                down * weightDown
+            ) / weightSum;
+
+            float directionalGradient = max(
+                abs(left - right),
+                abs(up - down)
+            );
+            float edgeRetention = smoothstep(0.035, 0.13, directionalGradient);
+            float denoisedGuide = mix(center, robustMean, 0.88);
+            return mix(denoisedGuide, center, edgeRetention);
+        }
+
         void main() {
             vec3 projected = uOutputToRaw * vec3(vOutputCoord, 1.0);
             vec2 rawCoord = clamp(projected.xy / projected.z, vec2(0.0), vec2(1.0));
@@ -832,6 +928,7 @@ object StillCaptureGlPipeline {
             float centerY = texture(uY, rawCoord).r;
             float centerU = texture(uU, rawCoord).r;
             float centerV = texture(uV, rawCoord).r;
+            float centerGuideY = lumaGuide(rawCoord);
             float finalU = centerU;
             float finalV = centerV;
 
@@ -852,13 +949,17 @@ object StillCaptureGlPipeline {
                             vec2(0.0),
                             vec2(1.0)
                         );
-                        float neighborY = texture(uY, neighborCoord).r;
+                        float neighborGuideY = lumaGuide(neighborCoord);
                         float neighborU = texture(uU, neighborCoord).r;
                         float neighborV = texture(uV, neighborCoord).r;
                         float distanceSquared = float(
                             offsetX * offsetX + offsetY * offsetY
                         );
-                        float rangeDifference = abs(neighborY - centerY);
+                        float rangeDifference = abs(neighborGuideY - centerGuideY);
+                        vec2 chromaDifference = vec2(
+                            neighborU - centerU,
+                            neighborV - centerV
+                        );
                         float spatialWeight = exp(
                             -distanceSquared /
                             (2.0 * uSigmaSpatial * uSigmaSpatial)
@@ -867,7 +968,14 @@ object StillCaptureGlPipeline {
                             -(rangeDifference * rangeDifference) /
                             (2.0 * uSigmaRange * uSigmaRange)
                         );
-                        float weight = spatialWeight * rangeWeight;
+                        float chromaWeight = 1.0;
+                        if (uChromaGuidanceEnabled == 1) {
+                            chromaWeight = exp(
+                                -dot(chromaDifference, chromaDifference) /
+                                (2.0 * uSigmaChroma * uSigmaChroma)
+                            );
+                        }
+                        float weight = spatialWeight * rangeWeight * chromaWeight;
                         sumU += neighborU * weight;
                         sumV += neighborV * weight;
                         sumWeight += weight;

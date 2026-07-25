@@ -622,6 +622,77 @@
 
                             <TextView
                                 style="@style/C1_SettingsSwitchLabel"
+                                android:text="High ISO pixel binning" />
+
+                            <com.google.android.material.materialswitch.MaterialSwitch
+                                android:id="@+id/high_iso_pixel_binning_switch"
+                                style="@style/C1_SettingsSwitch" />
+                        </LinearLayout>
+
+                        <View style="@style/C1_SettingsDivider" />
+
+                        <LinearLayout
+                            android:id="@+id/pixel_binning_mode_row"
+                            style="@style/C1_SettingsRow">
+
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:orientation="vertical">
+
+                                <TextView
+                                    style="@style/C1_SettingsTitle"
+                                    android:text="Pixel binning mode" />
+
+                                <TextView
+                                    style="@style/C1_SettingsSubtitle"
+                                    android:text="Average neighboring pixels into one" />
+                            </LinearLayout>
+
+                            <TextView
+                                android:id="@+id/pixel_binning_mode_value"
+                                style="@style/C1_SettingsValue"
+                                tools:text="2×2 → 1" />
+
+                            <ImageView style="@style/C1_SettingsChevron" />
+                        </LinearLayout>
+
+                        <View style="@style/C1_SettingsDivider" />
+
+                        <LinearLayout
+                            android:id="@+id/pixel_binning_threshold_row"
+                            style="@style/C1_SettingsRow">
+
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:orientation="vertical">
+
+                                <TextView
+                                    style="@style/C1_SettingsTitle"
+                                    android:text="Binning ISO threshold" />
+
+                                <TextView
+                                    style="@style/C1_SettingsSubtitle"
+                                    android:text="Enable only above the selected ISO" />
+                            </LinearLayout>
+
+                            <TextView
+                                android:id="@+id/pixel_binning_threshold_value"
+                                style="@style/C1_SettingsValue"
+                                tools:text="ISO &gt; 1600" />
+
+                            <ImageView style="@style/C1_SettingsChevron" />
+                        </LinearLayout>
+
+                        <View style="@style/C1_SettingsDivider" />
+
+                        <LinearLayout style="@style/C1_SettingsSwitchRow">
+
+                            <TextView
+                                style="@style/C1_SettingsSwitchLabel"
                                 android:text="Disable system noise reduction" />
 
                             <com.google.android.material.materialswitch.MaterialSwitch

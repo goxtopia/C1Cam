@@ -276,6 +276,9 @@ class CameraManager(
         val outputFormat = appSettings.imageOutputFormat
         val jpegQuality = appSettings.jpegQuality
         val chromaDenoiseMode = appSettings.chromaDenoiseMode
+        val isHighIsoPixelBinningEnabled = appSettings.isHighIsoPixelBinningEnabled
+        val highIsoPixelBinningMode = appSettings.highIsoPixelBinningMode
+        val highIsoPixelBinningThreshold = appSettings.highIsoPixelBinningThreshold
         val isCropModeOff = XpanMode.effectiveCropModeOff(
             appSettings.isXpanMode,
             appSettings.isCropModeOff
@@ -348,6 +351,9 @@ class CameraManager(
                                 ratio,
                                 lut,
                                 chromaDenoiseMode,
+                                isHighIsoPixelBinningEnabled,
+                                highIsoPixelBinningMode,
+                                highIsoPixelBinningThreshold,
                                 isCropModeOff,
                                 processingFocalLength,
                                 noCropAspectRatio,

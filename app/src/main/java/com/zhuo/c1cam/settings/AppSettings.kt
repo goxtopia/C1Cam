@@ -4,6 +4,8 @@ import com.zhuo.c1cam.camera.FocusMode
 import com.zhuo.c1cam.capture.ImageOutputFormat
 import com.zhuo.c1cam.capture.JpegQuality
 import com.zhuo.c1cam.processing.ChromaDenoiseMode
+import com.zhuo.c1cam.processing.HighIsoPixelBinning
+import com.zhuo.c1cam.processing.PixelBinningMode
 import com.zhuo.c1cam.processing.ToneMapPreset
 import com.zhuo.c1cam.xpan.XpanInstrumentTheme
 import com.zhuo.c1cam.xpan.XpanMeteringMode
@@ -27,6 +29,9 @@ class AppSettings(private val context: Context) {
     var isNoiseReductionOff = false
     var isEdgeModeOff = false
     var chromaDenoiseMode: ChromaDenoiseMode = ChromaDenoiseMode.OFF
+    var isHighIsoPixelBinningEnabled = false
+    var highIsoPixelBinningMode: PixelBinningMode = PixelBinningMode.TWO_BY_TWO
+    var highIsoPixelBinningThreshold: Int = HighIsoPixelBinning.DEFAULT_ISO_THRESHOLD
     var isCropModeOff = false
     var isWdrMode = false
     var focalLength: Int = 24
@@ -66,6 +71,16 @@ class AppSettings(private val context: Context) {
         } else {
             ChromaDenoiseMode.OFF
         }
+        isHighIsoPixelBinningEnabled = prefs.getBoolean(KEY_HIGH_ISO_BINNING_ENABLED, false)
+        highIsoPixelBinningMode = PixelBinningMode.fromStorageValue(
+            prefs.getString(KEY_HIGH_ISO_BINNING_MODE, null)
+        )
+        highIsoPixelBinningThreshold = HighIsoPixelBinning.sanitizeThreshold(
+            prefs.getInt(
+                KEY_HIGH_ISO_BINNING_THRESHOLD,
+                HighIsoPixelBinning.DEFAULT_ISO_THRESHOLD
+            )
+        )
         isCropModeOff = prefs.getBoolean(KEY_CROP_MODE_OFF, false)
         isWdrMode = prefs.getBoolean(KEY_WDR_MODE, false)
         focalLength = prefs.getInt(KEY_FOCAL_LENGTH, 24)
@@ -128,6 +143,9 @@ class AppSettings(private val context: Context) {
         editor.putBoolean(KEY_NR_OFF, isNoiseReductionOff)
         editor.putBoolean(KEY_EDGE_OFF, isEdgeModeOff)
         editor.putString(KEY_CHROMA_DENOISE_MODE, chromaDenoiseMode.storageValue)
+        editor.putBoolean(KEY_HIGH_ISO_BINNING_ENABLED, isHighIsoPixelBinningEnabled)
+        editor.putString(KEY_HIGH_ISO_BINNING_MODE, highIsoPixelBinningMode.storageValue)
+        editor.putInt(KEY_HIGH_ISO_BINNING_THRESHOLD, highIsoPixelBinningThreshold)
         editor.putBoolean(KEY_CROP_MODE_OFF, isCropModeOff)
         editor.putBoolean(KEY_WDR_MODE, isWdrMode)
         editor.putInt(KEY_FOCAL_LENGTH, focalLength)
@@ -171,6 +189,9 @@ class AppSettings(private val context: Context) {
         private const val KEY_EDGE_OFF = "edge_off"
         private const val KEY_CHROMA_DENOISE = "chroma_denoise_on"
         private const val KEY_CHROMA_DENOISE_MODE = "chroma_denoise_mode"
+        private const val KEY_HIGH_ISO_BINNING_ENABLED = "high_iso_binning_enabled"
+        private const val KEY_HIGH_ISO_BINNING_MODE = "high_iso_binning_mode"
+        private const val KEY_HIGH_ISO_BINNING_THRESHOLD = "high_iso_binning_threshold"
         private const val KEY_CROP_MODE_OFF = "crop_mode_off"
         private const val KEY_WDR_MODE = "wdr_mode"
         private const val KEY_FOCAL_LENGTH = "focal_length"

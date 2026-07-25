@@ -31,10 +31,15 @@ object ChromaNoiseReduction {
         uniform sampler2D texY;
         uniform sampler2D texU;
         uniform sampler2D texV;
+        uniform float lumaWidth;
+        uniform float lumaHeight;
         uniform float chromaWidth;
         uniform float chromaHeight;
         uniform float sigmaSpatial;
         uniform float sigmaRange;
+        uniform float sigmaChroma;
+        uniform int chromaGuidanceEnabled;
+        uniform int filteredLumaGuideEnabled;
         uniform float darkThreshold;
         uniform float filterStrength;
         uniform int radius;
@@ -52,6 +57,55 @@ object ChromaNoiseReduction {
             return clamp(vec3(r, g, b), 0.0, 1.0);
         }
 
+        float lumaGuide(vec2 coord) {
+            float center = texture2D(texY, coord).r;
+            if (filteredLumaGuideEnabled == 0) {
+                return center;
+            }
+
+            vec2 texel = 1.0 / vec2(lumaWidth, lumaHeight);
+            float left = texture2D(
+                texY,
+                clamp(coord - vec2(texel.x, 0.0), vec2(0.0), vec2(1.0))
+            ).r;
+            float right = texture2D(
+                texY,
+                clamp(coord + vec2(texel.x, 0.0), vec2(0.0), vec2(1.0))
+            ).r;
+            float up = texture2D(
+                texY,
+                clamp(coord - vec2(0.0, texel.y), vec2(0.0), vec2(1.0))
+            ).r;
+            float down = texture2D(
+                texY,
+                clamp(coord + vec2(0.0, texel.y), vec2(0.0), vec2(1.0))
+            ).r;
+
+            const float guideSigma = 0.075;
+            float denominator = 2.0 * guideSigma * guideSigma;
+            float differenceLeft = left - center;
+            float differenceRight = right - center;
+            float differenceUp = up - center;
+            float differenceDown = down - center;
+            float weightLeft = exp(-(differenceLeft * differenceLeft) / denominator);
+            float weightRight = exp(-(differenceRight * differenceRight) / denominator);
+            float weightUp = exp(-(differenceUp * differenceUp) / denominator);
+            float weightDown = exp(-(differenceDown * differenceDown) / denominator);
+            float weightSum = 1.0 + weightLeft + weightRight + weightUp + weightDown;
+            float robustMean = (
+                center +
+                left * weightLeft +
+                right * weightRight +
+                up * weightUp +
+                down * weightDown
+            ) / weightSum;
+
+            float directionalGradient = max(abs(left - right), abs(up - down));
+            float edgeRetention = smoothstep(0.035, 0.13, directionalGradient);
+            float denoisedGuide = mix(center, robustMean, 0.88);
+            return mix(denoisedGuide, center, edgeRetention);
+        }
+
         void main() {
             vec2 texSize = vec2(chromaWidth, chromaHeight);
             vec2 texelSize = 1.0 / texSize;
@@ -59,6 +113,7 @@ object ChromaNoiseReduction {
             float centerY = texture2D(texY, vTexCoord).r;
             float centerU = texture2D(texU, vTexCoord).r;
             float centerV = texture2D(texV, vTexCoord).r;
+            float centerGuideY = lumaGuide(vTexCoord);
 
             float sumU = 0.0;
             float sumV = 0.0;
@@ -69,17 +124,25 @@ object ChromaNoiseReduction {
                     vec2 offset = vec2(float(x), float(y)) * texelSize;
                     vec2 neighborCoord = clamp(vTexCoord + offset, vec2(0.0), vec2(1.0));
 
-                    float neighborY = texture2D(texY, neighborCoord).r;
+                    float neighborGuideY = lumaGuide(neighborCoord);
                     float neighborU = texture2D(texU, neighborCoord).r;
                     float neighborV = texture2D(texV, neighborCoord).r;
 
                     float distSq = float(x*x + y*y);
-                    float rangeDiff = abs(neighborY - centerY);
+                    float rangeDiff = abs(neighborGuideY - centerGuideY);
+                    vec2 chromaDiff = vec2(neighborU - centerU, neighborV - centerV);
 
                     float wSpatial = exp(-distSq / (2.0 * sigmaSpatial * sigmaSpatial));
                     float wRange = exp(-(rangeDiff * rangeDiff) / (2.0 * sigmaRange * sigmaRange));
+                    float wChroma = 1.0;
+                    if (chromaGuidanceEnabled == 1) {
+                        wChroma = exp(
+                            -dot(chromaDiff, chromaDiff) /
+                            (2.0 * sigmaChroma * sigmaChroma)
+                        );
+                    }
 
-                    float w = wSpatial * wRange;
+                    float w = wSpatial * wRange * wChroma;
 
                     sumU += neighborU * w;
                     sumV += neighborV * w;
@@ -194,12 +257,32 @@ object ChromaNoiseReduction {
             GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "chromaWidth"), (width / 2).toFloat())
             GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "chromaHeight"), (height / 2).toFloat())
             GLES20.glUniform1f(
+                GLES20.glGetUniformLocation(program, "lumaWidth"),
+                width.toFloat()
+            )
+            GLES20.glUniform1f(
+                GLES20.glGetUniformLocation(program, "lumaHeight"),
+                height.toFloat()
+            )
+            GLES20.glUniform1f(
                 GLES20.glGetUniformLocation(program, "sigmaSpatial"),
                 parameters.sigmaSpatial
             )
             GLES20.glUniform1f(
                 GLES20.glGetUniformLocation(program, "sigmaRange"),
                 parameters.sigmaRange
+            )
+            GLES20.glUniform1f(
+                GLES20.glGetUniformLocation(program, "sigmaChroma"),
+                parameters.sigmaChroma
+            )
+            GLES20.glUniform1i(
+                GLES20.glGetUniformLocation(program, "chromaGuidanceEnabled"),
+                if (parameters.useChromaGuidance) 1 else 0
+            )
+            GLES20.glUniform1i(
+                GLES20.glGetUniformLocation(program, "filteredLumaGuideEnabled"),
+                if (parameters.useFilteredLumaGuide) 1 else 0
             )
             GLES20.glUniform1f(
                 GLES20.glGetUniformLocation(program, "darkThreshold"),
@@ -287,6 +370,9 @@ object ChromaNoiseReduction {
                 radius = 1,
                 sigmaSpatial = 1.2f,
                 sigmaRange = 0.04f,
+                sigmaChroma = 10f,
+                useChromaGuidance = false,
+                useFilteredLumaGuide = false,
                 darkThreshold = 0.10f,
                 filterStrength = 0.45f
             )
@@ -294,6 +380,9 @@ object ChromaNoiseReduction {
                 radius = 2,
                 sigmaSpatial = 2.0f,
                 sigmaRange = 0.07f,
+                sigmaChroma = 10f,
+                useChromaGuidance = false,
+                useFilteredLumaGuide = false,
                 darkThreshold = 0.16f,
                 filterStrength = 0.72f
             )
@@ -301,11 +390,48 @@ object ChromaNoiseReduction {
                 radius = 3,
                 sigmaSpatial = 3.0f,
                 sigmaRange = 0.10f,
+                sigmaChroma = 10f,
+                useChromaGuidance = false,
+                useFilteredLumaGuide = false,
                 darkThreshold = 0.22f,
                 filterStrength = 1.0f
             )
+            ChromaDenoiseMode.VERY_HIGH -> DenoiseParameters(
+                radius = 3,
+                sigmaSpatial = 3.6f,
+                sigmaRange = 0.075f,
+                sigmaChroma = 0.12f,
+                useChromaGuidance = true,
+                useFilteredLumaGuide = false,
+                darkThreshold = 0.30f,
+                filterStrength = 1.0f
+            )
+            ChromaDenoiseMode.VERY_HIGH_LUMA -> DenoiseParameters(
+                radius = 3,
+                sigmaSpatial = 3.6f,
+                sigmaRange = 0.075f,
+                sigmaChroma = 10f,
+                useChromaGuidance = false,
+                useFilteredLumaGuide = false,
+                darkThreshold = 0.30f,
+                filterStrength = 1.0f
+            )
+            ChromaDenoiseMode.XHIGH_LUMA -> DenoiseParameters(
+                radius = 3,
+                sigmaSpatial = 3.8f,
+                sigmaRange = 0.055f,
+                sigmaChroma = 10f,
+                useChromaGuidance = false,
+                useFilteredLumaGuide = true,
+                darkThreshold = 0.34f,
+                filterStrength = 1.0f
+            )
             ChromaDenoiseMode.OFF,
-            ChromaDenoiseMode.AUTO -> error("Mode must be resolved before selecting parameters")
+            ChromaDenoiseMode.AUTO,
+            ChromaDenoiseMode.AUTO_HIGH,
+            ChromaDenoiseMode.AUTO_HIGH_LUMA,
+            ChromaDenoiseMode.AUTO_XHIGH_LUMA ->
+                error("Mode must be resolved before selecting parameters")
         }
     }
 
@@ -313,6 +439,9 @@ object ChromaNoiseReduction {
         val radius: Int,
         val sigmaSpatial: Float,
         val sigmaRange: Float,
+        val sigmaChroma: Float,
+        val useChromaGuidance: Boolean,
+        val useFilteredLumaGuide: Boolean,
         val darkThreshold: Float,
         val filterStrength: Float
     )

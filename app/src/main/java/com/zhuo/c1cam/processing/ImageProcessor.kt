@@ -63,6 +63,9 @@ class ImageProcessor(private val context: Context) {
         targetAspectRatio: Float,
         currentLut: Lut3D?,
         chromaDenoiseMode: ChromaDenoiseMode,
+        isHighIsoPixelBinningEnabled: Boolean,
+        highIsoPixelBinningMode: PixelBinningMode,
+        highIsoPixelBinningThreshold: Int,
         isCropModeOff: Boolean,
         focalLength: Int,
         noCropAspectRatio: Float,
@@ -74,7 +77,7 @@ class ImageProcessor(private val context: Context) {
         val processingStartedNanos = SystemClock.elapsedRealtimeNanos()
         val rotationDegrees = imageProxy.imageInfo.rotationDegrees
         var processingPath = "gpu"
-        val bitmapToSave = try {
+        val processedBitmap = try {
             val geometry = StillCaptureGeometry.create(
                 rawWidth = imageProxy.width,
                 rawHeight = imageProxy.height,
@@ -135,6 +138,27 @@ class ImageProcessor(private val context: Context) {
             )
         } finally {
             imageProxy.close()
+        }
+        val binningFactor = HighIsoPixelBinning.resolveFactor(
+            enabled = isHighIsoPixelBinningEnabled,
+            mode = highIsoPixelBinningMode,
+            isoThreshold = highIsoPixelBinningThreshold,
+            captureIso = captureMetadata.iso
+        )
+        val bitmapToSave = if (binningFactor > 1) {
+            HighIsoPixelBinning.process(processedBitmap, binningFactor).also { binned ->
+                if (binned !== processedBitmap && !processedBitmap.isRecycled) {
+                    processedBitmap.recycle()
+                }
+                Log.i(
+                    CAPTURE_PERF_TAG,
+                    "capture=$captureId stage=high_iso_binning iso=${captureMetadata.iso} " +
+                        "threshold=$highIsoPixelBinningThreshold factor=$binningFactor " +
+                        "output=${binned.width}x${binned.height}"
+                )
+            }
+        } else {
+            processedBitmap
         }
 
         val pixelsReadyNanos = SystemClock.elapsedRealtimeNanos()

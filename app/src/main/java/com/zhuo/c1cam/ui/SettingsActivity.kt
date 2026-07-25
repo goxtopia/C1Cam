@@ -4,7 +4,9 @@ import com.zhuo.c1cam.R
 import com.zhuo.c1cam.capture.ImageOutputFormat
 import com.zhuo.c1cam.capture.JpegQuality
 import com.zhuo.c1cam.processing.ChromaDenoiseMode
+import com.zhuo.c1cam.processing.HighIsoPixelBinning
 import com.zhuo.c1cam.processing.LutUtils
+import com.zhuo.c1cam.processing.PixelBinningMode
 import com.zhuo.c1cam.processing.ToneMapPreset
 import com.zhuo.c1cam.settings.AppSettings
 import com.zhuo.c1cam.settings.InactivityTimeout
@@ -49,6 +51,8 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var outputFormatValue: TextView
     private lateinit var jpegQualityValue: TextView
     private lateinit var chromaDenoiseValue: TextView
+    private lateinit var pixelBinningModeValue: TextView
+    private lateinit var pixelBinningThresholdValue: TextView
     private lateinit var inactivityTimeoutValue: TextView
     private lateinit var xpanUiLayoutValue: TextView
     private lateinit var xpanInstrumentThemeValue: TextView
@@ -90,6 +94,8 @@ class SettingsActivity : AppCompatActivity() {
         outputFormatValue = findViewById(R.id.output_format_value)
         jpegQualityValue = findViewById(R.id.jpeg_quality_value)
         chromaDenoiseValue = findViewById(R.id.chroma_denoise_value)
+        pixelBinningModeValue = findViewById(R.id.pixel_binning_mode_value)
+        pixelBinningThresholdValue = findViewById(R.id.pixel_binning_threshold_value)
         inactivityTimeoutValue = findViewById(R.id.inactivity_timeout_value)
         xpanUiLayoutValue = findViewById(R.id.xpan_ui_layout_value)
         xpanInstrumentThemeValue = findViewById(R.id.xpan_instrument_theme_value)
@@ -125,6 +131,12 @@ class SettingsActivity : AppCompatActivity() {
         }
         findViewById<View>(R.id.chroma_denoise_row).setOnClickListener {
             openSelectionPage(SelectionMode.CHROMA_DENOISE)
+        }
+        findViewById<View>(R.id.pixel_binning_mode_row).setOnClickListener {
+            openSelectionPage(SelectionMode.PIXEL_BINNING_MODE)
+        }
+        findViewById<View>(R.id.pixel_binning_threshold_row).setOnClickListener {
+            openSelectionPage(SelectionMode.PIXEL_BINNING_THRESHOLD)
         }
         findViewById<View>(R.id.inactivity_timeout_row).setOnClickListener {
             openSelectionPage(SelectionMode.INACTIVITY_TIMEOUT)
@@ -174,6 +186,12 @@ class SettingsActivity : AppCompatActivity() {
         bindSwitch(R.id.edge_off_switch, appSettings.isEdgeModeOff) {
             appSettings.isEdgeModeOff = it
         }
+        bindSwitch(
+            R.id.high_iso_pixel_binning_switch,
+            appSettings.isHighIsoPixelBinningEnabled
+        ) {
+            appSettings.isHighIsoPixelBinningEnabled = it
+        }
         bindSwitch(R.id.crop_mode_off_switch, appSettings.isCropModeOff) {
             appSettings.isCropModeOff = it
         }
@@ -213,6 +231,8 @@ class SettingsActivity : AppCompatActivity() {
             SelectionMode.OUTPUT_FORMAT -> outputFormatChoices()
             SelectionMode.JPEG_QUALITY -> jpegQualityChoices()
             SelectionMode.CHROMA_DENOISE -> chromaDenoiseChoices()
+            SelectionMode.PIXEL_BINNING_MODE -> pixelBinningModeChoices()
+            SelectionMode.PIXEL_BINNING_THRESHOLD -> pixelBinningThresholdChoices()
             SelectionMode.INACTIVITY_TIMEOUT -> inactivityTimeoutChoices()
             SelectionMode.XPAN_UI_LAYOUT -> xpanUiLayoutChoices()
             SelectionMode.XPAN_INSTRUMENT_THEME -> xpanInstrumentThemeChoices()
@@ -227,6 +247,8 @@ class SettingsActivity : AppCompatActivity() {
             SelectionMode.OUTPUT_FORMAT -> "File format"
             SelectionMode.JPEG_QUALITY -> "JPEG quality"
             SelectionMode.CHROMA_DENOISE -> "Chroma noise reduction"
+            SelectionMode.PIXEL_BINNING_MODE -> "Pixel binning mode"
+            SelectionMode.PIXEL_BINNING_THRESHOLD -> "High ISO threshold"
             SelectionMode.INACTIVITY_TIMEOUT -> "Auto-exit timeout"
             SelectionMode.XPAN_UI_LAYOUT -> "XPAN UI layout"
             SelectionMode.XPAN_INSTRUMENT_THEME -> "XPAN instrument screen"
@@ -240,6 +262,10 @@ class SettingsActivity : AppCompatActivity() {
             SelectionMode.OUTPUT_FORMAT -> "JPEG stores capture metadata. PNG preserves pixels losslessly."
             SelectionMode.JPEG_QUALITY -> "Higher quality produces larger JPEG files and takes longer to encode."
             SelectionMode.CHROMA_DENOISE -> "Auto selects strength from the ISO recorded for each capture."
+            SelectionMode.PIXEL_BINNING_MODE ->
+                "Each output pixel is the exact average of a 2×2 or 4×4 source block."
+            SelectionMode.PIXEL_BINNING_THRESHOLD ->
+                "Pixel binning starts only when capture ISO is higher than this value."
             SelectionMode.INACTIVITY_TIMEOUT -> "The display stays awake until this period passes without interaction."
             SelectionMode.XPAN_UI_LAYOUT ->
                 "Choose between the compact instrument grid and the full-width viewfinder."
@@ -298,6 +324,16 @@ class SettingsActivity : AppCompatActivity() {
 
             SelectionMode.CHROMA_DENOISE -> {
                 appSettings.chromaDenoiseMode = choice.chromaDenoiseMode ?: return
+            }
+
+            SelectionMode.PIXEL_BINNING_MODE -> {
+                appSettings.highIsoPixelBinningMode = choice.pixelBinningMode ?: return
+            }
+
+            SelectionMode.PIXEL_BINNING_THRESHOLD -> {
+                appSettings.highIsoPixelBinningThreshold = HighIsoPixelBinning.sanitizeThreshold(
+                    choice.intValue ?: return
+                )
             }
 
             SelectionMode.INACTIVITY_TIMEOUT -> {
@@ -469,6 +505,23 @@ class SettingsActivity : AppCompatActivity() {
                 selected = appSettings.chromaDenoiseMode == ChromaDenoiseMode.AUTO
             ),
             Choice(
+                label = "Auto · High · Stronger, edge-aware filtering",
+                chromaDenoiseMode = ChromaDenoiseMode.AUTO_HIGH,
+                selected = appSettings.chromaDenoiseMode == ChromaDenoiseMode.AUTO_HIGH
+            ),
+            Choice(
+                label = "Auto · High · Luma · Y-guided texture protection",
+                chromaDenoiseMode = ChromaDenoiseMode.AUTO_HIGH_LUMA,
+                selected = appSettings.chromaDenoiseMode ==
+                    ChromaDenoiseMode.AUTO_HIGH_LUMA
+            ),
+            Choice(
+                label = "Auto · XHigh · Luma · Prefiltered Y guidance",
+                chromaDenoiseMode = ChromaDenoiseMode.AUTO_XHIGH_LUMA,
+                selected = appSettings.chromaDenoiseMode ==
+                    ChromaDenoiseMode.AUTO_XHIGH_LUMA
+            ),
+            Choice(
                 label = "Off",
                 chromaDenoiseMode = ChromaDenoiseMode.OFF,
                 selected = appSettings.chromaDenoiseMode == ChromaDenoiseMode.OFF
@@ -489,6 +542,31 @@ class SettingsActivity : AppCompatActivity() {
                 selected = appSettings.chromaDenoiseMode == ChromaDenoiseMode.HIGH
             )
         )
+    }
+
+    private fun pixelBinningModeChoices(): List<Choice> {
+        return PixelBinningMode.entries.map { mode ->
+            Choice(
+                label = when (mode) {
+                    PixelBinningMode.TWO_BY_TWO -> "2×2 → 1 · Quarter resolution"
+                    PixelBinningMode.FOUR_BY_FOUR -> "4×4 → 1 · One-sixteenth resolution"
+                },
+                pixelBinningMode = mode,
+                selected = appSettings.highIsoPixelBinningMode == mode
+            )
+        }
+    }
+
+    private fun pixelBinningThresholdChoices(): List<Choice> {
+        return HighIsoPixelBinning.isoThresholdChoices.map { iso ->
+            Choice(
+                label = "Above ISO $iso${
+                    if (iso == HighIsoPixelBinning.DEFAULT_ISO_THRESHOLD) " · Default" else ""
+                }",
+                intValue = iso,
+                selected = appSettings.highIsoPixelBinningThreshold == iso
+            )
+        }
     }
 
     private fun inactivityTimeoutChoices(): List<Choice> {
@@ -534,6 +612,8 @@ class SettingsActivity : AppCompatActivity() {
         outputFormatValue.text = appSettings.imageOutputFormat.name
         jpegQualityValue.text = appSettings.jpegQuality.toString()
         chromaDenoiseValue.text = appSettings.chromaDenoiseMode.displayName
+        pixelBinningModeValue.text = appSettings.highIsoPixelBinningMode.displayName
+        pixelBinningThresholdValue.text = "ISO > ${appSettings.highIsoPixelBinningThreshold}"
         inactivityTimeoutValue.text = InactivityTimeout.label(
             appSettings.inactivityTimeoutMinutes
         )
@@ -705,6 +785,8 @@ class SettingsActivity : AppCompatActivity() {
         OUTPUT_FORMAT,
         JPEG_QUALITY,
         CHROMA_DENOISE,
+        PIXEL_BINNING_MODE,
+        PIXEL_BINNING_THRESHOLD,
         INACTIVITY_TIMEOUT,
         XPAN_UI_LAYOUT,
         XPAN_INSTRUMENT_THEME
@@ -718,6 +800,7 @@ class SettingsActivity : AppCompatActivity() {
         val outputFormat: ImageOutputFormat? = null,
         val toneMapPreset: ToneMapPreset? = null,
         val chromaDenoiseMode: ChromaDenoiseMode? = null,
+        val pixelBinningMode: PixelBinningMode? = null,
         val xpanUiLayout: XpanUiLayout? = null,
         val xpanInstrumentTheme: XpanInstrumentTheme? = null,
         val selected: Boolean = false
