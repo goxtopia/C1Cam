@@ -12,6 +12,7 @@ import com.zhuo.c1cam.settings.AppSettings
 import com.zhuo.c1cam.settings.PreviewDisplayMode
 import com.zhuo.c1cam.ui.OverlayView
 import com.zhuo.c1cam.xpan.NormalizedMeteringRegion
+import com.zhuo.c1cam.xpan.XpanFrameLayoutModel
 import com.zhuo.c1cam.xpan.XpanMeteringMode
 import com.zhuo.c1cam.xpan.XpanMeteringRegionModel
 import com.zhuo.c1cam.xpan.XpanMode
@@ -77,7 +78,7 @@ class CameraManager(
     private val lutProvider: () -> Lut3D?,
     private val savedImageRotationDegreesProvider: () -> Int,
     private val onPreviewSourceAspectRatioChanged: () -> Unit,
-    private val onXpanTelemetryUpdated: (XpanTelemetry) -> Unit,
+    private val onCameraTelemetryUpdated: (XpanTelemetry) -> Unit,
     private val onAfLockStateChanged: () -> Unit,
     private val onCaptureProcessingStatusChanged: (CaptureProcessingStatus) -> Unit
 ) {
@@ -179,7 +180,7 @@ class CameraManager(
                     val lumaAnalysis = analyzeXpanLuma(imageProxy)
                     latestHistogram = lumaAnalysis.histogram
                     updateXpanSoftwareMetering(lumaAnalysis.meteredLuma)
-                    dispatchXpanTelemetry()
+                    dispatchCameraTelemetry()
                     imageProxy.close()
                     return@setAnalyzer
                 }
@@ -290,7 +291,8 @@ class CameraManager(
         )
         val noCropAspectRatio = XpanMode.effectiveNoCropAspectRatio(
             appSettings.isXpanMode,
-            appSettings.noCropAspectRatio
+            appSettings.noCropAspectRatio,
+            appSettings.xpanAspectRatio
         )
         val exposureCompensationEv = appSettings.evVal
         // Freeze orientation at shutter press; sensor changes during processing must not
@@ -572,14 +574,18 @@ class CameraManager(
         val zoomTop = activeArray.top + (activeArray.height() - zoomHeight) / 2
 
         val zoomAspectRatio = zoomWidth.toFloat() / zoomHeight.toFloat()
+        val frameAspectRatio = XpanFrameLayoutModel.effectiveFrameAspectRatio(
+            appSettings.xpanAspectRatio,
+            zoomAspectRatio
+        )
         val frameWidth: Int
         val frameHeight: Int
-        if (zoomAspectRatio > XpanMode.ASPECT_RATIO) {
+        if (zoomAspectRatio > frameAspectRatio) {
             frameHeight = zoomHeight
-            frameWidth = (frameHeight * XpanMode.ASPECT_RATIO).roundToInt()
+            frameWidth = (frameHeight * frameAspectRatio).roundToInt()
         } else {
             frameWidth = zoomWidth
-            frameHeight = (frameWidth / XpanMode.ASPECT_RATIO).roundToInt()
+            frameHeight = (frameWidth / frameAspectRatio).roundToInt()
         }
         val frameLeft = zoomLeft + (zoomWidth - frameWidth) / 2
         val frameTop = zoomTop + (zoomHeight - frameHeight) / 2
@@ -903,7 +909,7 @@ class CameraManager(
                     }
                 )
                 latestCaptureMetadata = metadata
-                dispatchXpanTelemetry()
+                dispatchCameraTelemetry()
                 logAppliedXpanMeteringRequest(request)
                 val captureIntent = request.get(CaptureRequest.CONTROL_CAPTURE_INTENT)
                 if (captureIntent == CaptureRequest.CONTROL_CAPTURE_INTENT_STILL_CAPTURE ||
@@ -967,7 +973,11 @@ class CameraManager(
         var sampledPixels = 0
         var weightedLumaSum = 0f
         var meteringWeightSum = 0f
-        val meteringFrame = XpanSoftwareMeteringModel.frameFor(image.width, image.height)
+        val meteringFrame = XpanSoftwareMeteringModel.frameFor(
+            image.width,
+            image.height,
+            appSettings.xpanAspectRatio
+        )
 
         var y = meteringFrame.top
         while (y < meteringFrame.bottom) {
@@ -1049,8 +1059,7 @@ class CameraManager(
         )
     }
 
-    private fun dispatchXpanTelemetry() {
-        if (!appSettings.isXpanMode) return
+    private fun dispatchCameraTelemetry() {
         val now = SystemClock.elapsedRealtime()
         if (now - lastTelemetryDispatchElapsedMs < TELEMETRY_INTERVAL_MS) return
         lastTelemetryDispatchElapsedMs = now
@@ -1061,9 +1070,7 @@ class CameraManager(
             exposureTimeNs = metadata?.exposureTimeNs
         )
         activity.runOnUiThread {
-            if (appSettings.isXpanMode) {
-                onXpanTelemetryUpdated(telemetry)
-            }
+            onCameraTelemetryUpdated(telemetry)
         }
     }
 

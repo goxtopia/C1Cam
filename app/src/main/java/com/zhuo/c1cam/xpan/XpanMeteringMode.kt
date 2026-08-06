@@ -78,19 +78,27 @@ data class XpanMeteringFrame(
 }
 
 object XpanSoftwareMeteringModel {
-    fun frameFor(imageWidth: Int, imageHeight: Int): XpanMeteringFrame {
+    fun frameFor(
+        imageWidth: Int,
+        imageHeight: Int,
+        aspectRatio: Float = XpanMode.ASPECT_RATIO
+    ): XpanMeteringFrame {
         if (imageWidth <= 0 || imageHeight <= 0) {
             return XpanMeteringFrame(0, 0, 1, 1)
         }
         val sourceRatio = imageWidth.toFloat() / imageHeight.toFloat()
-        return if (sourceRatio > XpanMode.ASPECT_RATIO) {
-            val width = (imageHeight * XpanMode.ASPECT_RATIO)
+        val frameRatio = XpanFrameLayoutModel.effectiveFrameAspectRatio(
+            aspectRatio,
+            sourceRatio
+        )
+        return if (sourceRatio > frameRatio) {
+            val width = (imageHeight * frameRatio)
                 .toInt()
                 .coerceIn(1, imageWidth)
             val left = (imageWidth - width) / 2
             XpanMeteringFrame(left, 0, left + width, imageHeight)
         } else {
-            val height = (imageWidth / XpanMode.ASPECT_RATIO)
+            val height = (imageWidth / frameRatio)
                 .toInt()
                 .coerceIn(1, imageHeight)
             val top = (imageHeight - height) / 2

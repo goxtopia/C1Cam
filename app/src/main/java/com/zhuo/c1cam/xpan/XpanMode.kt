@@ -24,8 +24,16 @@ object XpanMode {
         return enabled || configured
     }
 
-    fun effectiveNoCropAspectRatio(enabled: Boolean, configured: Float): Float {
-        return if (enabled) ASPECT_RATIO else configured
+    fun effectiveNoCropAspectRatio(
+        enabled: Boolean,
+        configured: Float,
+        xpanConfigured: Float = ASPECT_RATIO
+    ): Float {
+        return if (enabled) {
+            if (xpanConfigured <= 0f) 0f else xpanConfigured.coerceIn(1f, ASPECT_RATIO)
+        } else {
+            configured
+        }
     }
 
     /**
@@ -42,18 +50,25 @@ data class XpanFrameSize(
     val height: Int
 )
 
+data class XpanFramePosition(
+    val left: Int,
+    val top: Int
+)
+
 object XpanFrameLayoutModel {
     fun calculate(
         containerWidth: Int,
         containerHeight: Int,
-        uiLayout: XpanUiLayout = XpanUiLayout.SCHEME_1
+        uiLayout: XpanUiLayout = XpanUiLayout.SCHEME_1,
+        aspectRatio: Float = XpanMode.ASPECT_RATIO,
+        sourceAspectRatio: Float = 4f / 3f
     ): XpanFrameSize {
         if (containerWidth <= 0 || containerHeight <= 0) {
             return XpanFrameSize(1, 1)
         }
 
         val isFullViewfinder = uiLayout == XpanUiLayout.SCHEME_2
-        return if (containerWidth > containerHeight) {
+        val xpanFrame = if (containerWidth > containerHeight) {
             val desiredWidth = containerWidth * if (isFullViewfinder) 0.94f else 0.72f
             val heightLimitedWidth = containerHeight *
                 (if (isFullViewfinder) 0.64f else 0.52f) *
@@ -74,6 +89,77 @@ object XpanFrameLayoutModel {
                 height = height
             )
         }
+
+        val frameRatio = effectiveFrameAspectRatio(aspectRatio, sourceAspectRatio)
+        return if (containerWidth > containerHeight) {
+            XpanFrameSize(
+                width = (xpanFrame.height * frameRatio).toInt().coerceAtLeast(1),
+                height = xpanFrame.height
+            )
+        } else {
+            XpanFrameSize(
+                width = xpanFrame.width,
+                height = (xpanFrame.width * frameRatio).toInt().coerceAtLeast(1)
+            )
+        }
+    }
+
+    fun effectiveFrameAspectRatio(
+        aspectRatio: Float,
+        sourceAspectRatio: Float = 4f / 3f
+    ): Float {
+        val sourceLongToShort = sourceAspectRatio
+            .takeIf { it > 0f }
+            ?.let { maxOf(it, 1f / it) }
+            ?: 4f / 3f
+        return (if (aspectRatio > 0f) aspectRatio else sourceLongToShort)
+            .coerceIn(1f, XpanMode.ASPECT_RATIO)
+    }
+}
+
+object XpanFramePositionModel {
+    fun calculate(
+        containerWidth: Int,
+        containerHeight: Int,
+        frame: XpanFrameSize,
+        nativeFrame: XpanFrameSize,
+        uiLayout: XpanUiLayout,
+        landscapeStartMargin: Int,
+        portraitCompactEndMargin: Int,
+        portraitFullEndMargin: Int,
+        topMargin: Int
+    ): XpanFramePosition {
+        if (containerWidth > containerHeight) {
+            val nativeLeft = if (uiLayout == XpanUiLayout.SCHEME_2) {
+                (containerWidth - nativeFrame.width) / 2
+            } else {
+                landscapeStartMargin
+            }
+            val left = if (uiLayout == XpanUiLayout.SCHEME_2) {
+                nativeLeft + (nativeFrame.width - frame.width) / 2
+            } else {
+                nativeLeft
+            }
+            return XpanFramePosition(
+                left = left.coerceAtLeast(0),
+                top = topMargin.coerceAtLeast(0)
+            )
+        }
+
+        val endMargin = if (uiLayout == XpanUiLayout.SCHEME_2) {
+            portraitFullEndMargin
+        } else {
+            portraitCompactEndMargin
+        }
+        val top = if (uiLayout == XpanUiLayout.SCHEME_2) {
+            topMargin + (nativeFrame.height - frame.height) / 2
+        } else {
+            topMargin
+        }
+        return XpanFramePosition(
+            left = (containerWidth - endMargin - frame.width).coerceAtLeast(0),
+            top = top.coerceAtLeast(0)
+        )
     }
 }
 

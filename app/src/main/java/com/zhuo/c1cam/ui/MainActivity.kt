@@ -17,6 +17,7 @@ import com.zhuo.c1cam.settings.PreviewDisplayUiModel
 import com.zhuo.c1cam.xpan.CropFrameGuideModel
 import com.zhuo.c1cam.xpan.XpanDashboardView
 import com.zhuo.c1cam.xpan.XpanFrameLayoutModel
+import com.zhuo.c1cam.xpan.XpanFramePositionModel
 import com.zhuo.c1cam.xpan.XpanInfoColumnLayoutModel
 import com.zhuo.c1cam.xpan.XpanMeteringMode
 import com.zhuo.c1cam.xpan.XpanMode
@@ -73,7 +74,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var xpanBottomControls: View
     private lateinit var xpanViewfinderLabel: TextView
     private lateinit var xpanViewfinderOverlay: View
-    private lateinit var xpanModeBadge: View
+    private lateinit var xpanModeBadge: TextView
+    private lateinit var normalExposureLabel: TextView
     private lateinit var cameraStatus: View
     private lateinit var xpanEvLabel: TextView
     private lateinit var xpanEvSlider: Slider
@@ -164,6 +166,7 @@ class MainActivity : AppCompatActivity() {
         xpanViewfinderLabel = findViewById(R.id.xpan_viewfinder_label)
         xpanViewfinderOverlay = findViewById(R.id.xpan_viewfinder_overlay)
         xpanModeBadge = findViewById(R.id.xpan_mode_badge)
+        normalExposureLabel = findViewById(R.id.normal_exposure_label)
         cameraStatus = findViewById(R.id.camera_status)
         xpanEvLabel = findViewById(R.id.xpan_ev_label)
         xpanEvSlider = findViewById(R.id.xpan_ev_slider)
@@ -205,10 +208,21 @@ class MainActivity : AppCompatActivity() {
                     displayRotation = latestDisplayRotation
                 )
             },
-            onPreviewSourceAspectRatioChanged = { updateCropFrameGuideUi() },
-            onXpanTelemetryUpdated = { telemetry ->
+            onPreviewSourceAspectRatioChanged = {
+                updateCropFrameGuideUi()
+                if (appSettings.isXpanMode && appSettings.xpanAspectRatio <= 0f) {
+                    applyXpanModeUi()
+                }
+            },
+            onCameraTelemetryUpdated = { telemetry ->
                 xpanDashboard.updateTelemetry(telemetry)
                 xpanProcessingPanel.updateTelemetry(telemetry)
+                normalExposureLabel.text = buildString {
+                    append("ISO ")
+                    append(telemetry.iso ?: "—")
+                    append("  ·  SS ")
+                    append(formatShutterSpeed(telemetry.exposureTimeNs))
+                }
             },
             onAfLockStateChanged = {
                 updateLockButtonsUi()
@@ -638,6 +652,9 @@ class MainActivity : AppCompatActivity() {
     private fun applyXpanModeUi() {
         val enabled = appSettings.isXpanMode
         xpanDashboard.setUiLayout(appSettings.xpanUiLayout)
+        val ratioLabel = xpanRatioLabel(appSettings.xpanAspectRatio)
+        xpanDashboard.setFrameRatioLabel(ratioLabel)
+        xpanModeBadge.text = "XPAN · $ratioLabel"
         if (enabled) {
             overlay.isEditMode = false
         }
@@ -652,6 +669,7 @@ class MainActivity : AppCompatActivity() {
         xpanViewfinderLabel.visibility = if (enabled) View.VISIBLE else View.GONE
         xpanViewfinderOverlay.visibility = if (enabled) View.VISIBLE else View.GONE
         xpanProcessingPanel.visibility = if (enabled) View.VISIBLE else View.GONE
+        normalExposureLabel.visibility = if (enabled) View.GONE else View.VISIBLE
         liveViewLabel.visibility = if (enabled) View.GONE else View.VISIBLE
         overlay.isEnabled = !enabled
         overlay.isOverlayVisible = !enabled && !appSettings.isCropModeOff
@@ -672,59 +690,44 @@ class MainActivity : AppCompatActivity() {
                 val frame = XpanFrameLayoutModel.calculate(
                     mainViewContainer.width,
                     mainViewContainer.height,
-                    appSettings.xpanUiLayout
+                    appSettings.xpanUiLayout,
+                    appSettings.xpanAspectRatio,
+                    cameraManager.getLatestPreviewSourceAspectRatio()
+                )
+                val nativeFrame = XpanFrameLayoutModel.calculate(
+                    mainViewContainer.width,
+                    mainViewContainer.height,
+                    appSettings.xpanUiLayout,
+                    XpanMode.ASPECT_RATIO,
+                    cameraManager.getLatestPreviewSourceAspectRatio()
+                )
+                val framePosition = XpanFramePositionModel.calculate(
+                    containerWidth = mainViewContainer.width,
+                    containerHeight = mainViewContainer.height,
+                    frame = frame,
+                    nativeFrame = nativeFrame,
+                    uiLayout = appSettings.xpanUiLayout,
+                    landscapeStartMargin = dp(16),
+                    portraitCompactEndMargin = dp(28),
+                    portraitFullEndMargin = dp(16),
+                    topMargin = dp(18)
                 )
                 params.width = frame.width
                 params.height = frame.height
-                val isVerticalFrame = frame.height > frame.width
-                val isFullViewfinder =
-                    appSettings.xpanUiLayout == XpanUiLayout.SCHEME_2
-                xpanViewfinderLabel.text = if (isVerticalFrame) {
-                    "24 × 65  ·  AF-C"
-                } else {
-                    "65 × 24  ·  AF-C"
-                }
-                params.gravity = when {
-                    isVerticalFrame -> Gravity.TOP or Gravity.END
-                    isFullViewfinder -> Gravity.TOP or Gravity.CENTER_HORIZONTAL
-                    else -> Gravity.TOP or Gravity.START
-                }
-                val verticalFrameEndMargin = if (
-                    isVerticalFrame && !isFullViewfinder
-                ) {
-                    dp(28)
-                } else {
-                    dp(16)
-                }
-                if (isFullViewfinder && !isVerticalFrame) {
-                    params.setMargins(0, dp(18), 0, 0)
-                } else {
-                    params.setMargins(
-                        if (isVerticalFrame) 0 else dp(16),
-                        dp(18),
-                        if (isVerticalFrame) verticalFrameEndMargin else 0,
-                        0
-                    )
-                }
+                xpanViewfinderLabel.text = "$ratioLabel  ·  AF-C"
+                params.gravity = Gravity.TOP or Gravity.START
+                params.setMargins(framePosition.left, framePosition.top, 0, 0)
                 cameraContainer.setBackgroundResource(R.drawable.bg_xpan_viewfinder)
                 cameraContainer.setPadding(dp(4), dp(4), dp(4), dp(4))
                 cameraContainer.clipToOutline = true
 
                 val labelParams = xpanViewfinderLabel.layoutParams as
                     android.widget.FrameLayout.LayoutParams
-                labelParams.gravity = Gravity.TOP or
-                    if (isVerticalFrame) Gravity.END else Gravity.START
-                val centeredFrameLeft = (
-                    (mainViewContainer.width - frame.width) / 2
-                    ).coerceAtLeast(0)
+                labelParams.gravity = Gravity.TOP or Gravity.START
                 labelParams.setMargins(
-                    when {
-                        isVerticalFrame -> 0
-                        isFullViewfinder -> centeredFrameLeft + dp(11)
-                        else -> dp(27)
-                    },
-                    dp(29),
-                    if (isVerticalFrame) verticalFrameEndMargin + dp(11) else 0,
+                    framePosition.left + dp(11),
+                    framePosition.top + dp(11),
+                    0,
                     0
                 )
                 xpanViewfinderLabel.layoutParams = labelParams
@@ -749,6 +752,29 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateXpanFocalValue() {
         xpanFocalValue.text = "${appSettings.focalLength.coerceIn(24, 50)} MM"
+    }
+
+    private fun xpanRatioLabel(value: Float): String {
+        return when {
+            value <= 0f -> "ORIGINAL"
+            kotlin.math.abs(value - XpanMode.ASPECT_RATIO) < 0.001f -> "65:24"
+            kotlin.math.abs(value - 1f) < 0.001f -> "1:1"
+            kotlin.math.abs(value - 1.5f) < 0.001f -> "3:2"
+            kotlin.math.abs(value - 16f / 9f) < 0.001f -> "16:9"
+            kotlin.math.abs(value - 2.35f) < 0.001f -> "2.35:1"
+            kotlin.math.abs(value - 2.55f) < 0.001f -> "2.55:1"
+            else -> "${"%.2f".format(java.util.Locale.US, value)}:1"
+        }
+    }
+
+    private fun formatShutterSpeed(valueNs: Long?): String {
+        if (valueNs == null || valueNs <= 0L) return "—"
+        val seconds = valueNs / 1_000_000_000.0
+        return if (seconds >= 0.8) {
+            String.format(java.util.Locale.US, "%.1fs", seconds)
+        } else {
+            "1/${(1.0 / seconds).toInt().coerceAtLeast(1)}"
+        }
     }
 
     private fun updateXpanMeteringButtonUi() {

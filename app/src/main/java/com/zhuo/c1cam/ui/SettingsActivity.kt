@@ -11,6 +11,7 @@ import com.zhuo.c1cam.processing.ToneMapPreset
 import com.zhuo.c1cam.settings.AppSettings
 import com.zhuo.c1cam.settings.InactivityTimeout
 import com.zhuo.c1cam.xpan.XpanInstrumentTheme
+import com.zhuo.c1cam.xpan.XpanMode
 import com.zhuo.c1cam.xpan.XpanUiLayout
 import android.net.Uri
 import android.os.Bundle
@@ -176,6 +177,7 @@ class SettingsActivity : AppCompatActivity() {
     private fun bindSwitches() {
         bindSwitch(R.id.xpan_mode_switch, appSettings.isXpanMode) {
             appSettings.isXpanMode = it
+            updateSummaries()
         }
         bindSwitch(R.id.sports_switch, appSettings.isSportsMode) {
             appSettings.isSportsMode = it
@@ -295,7 +297,11 @@ class SettingsActivity : AppCompatActivity() {
                     showCustomRatioForm()
                     return
                 }
-                appSettings.targetAspectRatio = ratio
+                if (appSettings.isXpanMode) {
+                    appSettings.xpanAspectRatio = ratio
+                } else {
+                    appSettings.targetAspectRatio = ratio
+                }
             }
 
             SelectionMode.FOCAL_LENGTH -> {
@@ -303,7 +309,12 @@ class SettingsActivity : AppCompatActivity() {
             }
 
             SelectionMode.NO_CROP_RATIO -> {
-                appSettings.noCropAspectRatio = choice.floatValue ?: return
+                val ratio = choice.floatValue ?: return
+                if (appSettings.isXpanMode) {
+                    appSettings.xpanAspectRatio = ratio
+                } else {
+                    appSettings.noCropAspectRatio = ratio
+                }
             }
 
             SelectionMode.LUT -> {
@@ -373,7 +384,12 @@ class SettingsActivity : AppCompatActivity() {
             Toast.makeText(this, "Enter a valid width and height", Toast.LENGTH_SHORT).show()
             return
         }
-        appSettings.targetAspectRatio = width / height
+        val ratio = width / height
+        if (selectionMode == SelectionMode.TARGET_RATIO && appSettings.isXpanMode) {
+            appSettings.xpanAspectRatio = ratio.coerceIn(1f, XpanMode.ASPECT_RATIO)
+        } else {
+            appSettings.targetAspectRatio = ratio
+        }
         saveSettings()
         updateSummaries()
         customRatioForm.visibility = View.GONE
@@ -394,16 +410,18 @@ class SettingsActivity : AppCompatActivity() {
     private fun targetRatioChoices(): List<Choice> {
         val values = listOf(
             "Original" to 0f,
+            "XPAN · 65:24" to XpanMode.ASPECT_RATIO,
             "A4 · 1.414:1" to 1.414f,
             "Letter · 1.294:1" to 1.294f,
             "4:3 · 1.333:1" to 1.333f,
             "16:9 · 1.778:1" to 1.778f
         )
+        val selectedRatio = activeTargetAspectRatio()
         return values.map { (label, value) ->
-            Choice(label, floatValue = value, selected = nearlyEqual(appSettings.targetAspectRatio, value))
+            Choice(label, floatValue = value, selected = nearlyEqual(selectedRatio, value))
         } + Choice(
             label = "Custom ratio…",
-            selected = values.none { nearlyEqual(appSettings.targetAspectRatio, it.second) }
+            selected = values.none { nearlyEqual(selectedRatio, it.second) }
         )
     }
 
@@ -421,14 +439,16 @@ class SettingsActivity : AppCompatActivity() {
     private fun noCropRatioChoices(): List<Choice> {
         val values = listOf(
             "Original" to 0f,
+            "XPAN · 65:24" to XpanMode.ASPECT_RATIO,
             "3:2" to 1.5f,
             "16:9" to 16f / 9f,
             "2.35:1" to 2.35f,
             "2.55:1" to 2.55f,
             "1:1" to 1f
         )
+        val selectedRatio = activeNoCropAspectRatio()
         return values.map { (label, value) ->
-            Choice(label, floatValue = value, selected = nearlyEqual(appSettings.noCropAspectRatio, value))
+            Choice(label, floatValue = value, selected = nearlyEqual(selectedRatio, value))
         }
     }
 
@@ -604,9 +624,9 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun updateSummaries() {
-        targetRatioValue.text = targetRatioLabel(appSettings.targetAspectRatio)
+        targetRatioValue.text = targetRatioLabel(activeTargetAspectRatio())
         focalLengthValue.text = "${appSettings.focalLength} mm"
-        noCropRatioValue.text = noCropRatioLabel(appSettings.noCropAspectRatio)
+        noCropRatioValue.text = noCropRatioLabel(activeNoCropAspectRatio())
         lutValue.text = lutLabel(appSettings.lutName)
         toneMapValue.text = appSettings.toneMapPreset.displayName
         outputFormatValue.text = appSettings.imageOutputFormat.name
@@ -624,6 +644,7 @@ class SettingsActivity : AppCompatActivity() {
     private fun targetRatioLabel(value: Float): String {
         return when {
             nearlyEqual(value, 0f) -> "Original"
+            nearlyEqual(value, XpanMode.ASPECT_RATIO) -> "XPAN · 65:24"
             nearlyEqual(value, 1.414f) -> "A4"
             nearlyEqual(value, 1.294f) -> "Letter"
             nearlyEqual(value, 1.333f) -> "4:3"
@@ -635,12 +656,29 @@ class SettingsActivity : AppCompatActivity() {
     private fun noCropRatioLabel(value: Float): String {
         return when {
             nearlyEqual(value, 0f) -> "Original"
+            nearlyEqual(value, XpanMode.ASPECT_RATIO) -> "XPAN · 65:24"
             nearlyEqual(value, 1.5f) -> "3:2"
             nearlyEqual(value, 16f / 9f) -> "16:9"
             nearlyEqual(value, 2.35f) -> "2.35:1"
             nearlyEqual(value, 2.55f) -> "2.55:1"
             nearlyEqual(value, 1f) -> "1:1"
             else -> String.format(Locale.US, "%.2f:1", value)
+        }
+    }
+
+    private fun activeNoCropAspectRatio(): Float {
+        return if (appSettings.isXpanMode) {
+            appSettings.xpanAspectRatio
+        } else {
+            appSettings.noCropAspectRatio
+        }
+    }
+
+    private fun activeTargetAspectRatio(): Float {
+        return if (appSettings.isXpanMode) {
+            appSettings.xpanAspectRatio
+        } else {
+            appSettings.targetAspectRatio
         }
     }
 

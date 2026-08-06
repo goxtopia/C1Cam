@@ -9,6 +9,7 @@ import com.zhuo.c1cam.processing.PixelBinningMode
 import com.zhuo.c1cam.processing.ToneMapPreset
 import com.zhuo.c1cam.xpan.XpanInstrumentTheme
 import com.zhuo.c1cam.xpan.XpanMeteringMode
+import com.zhuo.c1cam.xpan.XpanMode
 import com.zhuo.c1cam.xpan.XpanUiLayout
 import android.content.Context
 import android.graphics.PointF
@@ -41,6 +42,7 @@ class AppSettings(private val context: Context) {
     var imageOutputFormat: ImageOutputFormat = ImageOutputFormat.JPEG
     var jpegQuality: Int = JpegQuality.DEFAULT
     var isXpanMode: Boolean = false
+    var xpanAspectRatio: Float = XpanMode.ASPECT_RATIO
     var xpanUiLayout: XpanUiLayout = XpanUiLayout.SCHEME_1
     var xpanMeteringMode: XpanMeteringMode = XpanMeteringMode.CENTER_WEIGHTED
     var xpanInstrumentTheme: XpanInstrumentTheme = XpanInstrumentTheme.GREEN
@@ -96,6 +98,7 @@ class AppSettings(private val context: Context) {
             prefs.getInt(KEY_JPEG_QUALITY, JpegQuality.DEFAULT)
         )
         isXpanMode = prefs.getBoolean(KEY_XPAN_MODE, false)
+        xpanAspectRatio = prefs.getFloat(KEY_XPAN_ASPECT_RATIO, XpanMode.ASPECT_RATIO)
         xpanUiLayout = XpanUiLayout.fromStorageValue(
             prefs.getString(KEY_XPAN_UI_LAYOUT, XpanUiLayout.SCHEME_1.storageValue)
         )
@@ -155,6 +158,7 @@ class AppSettings(private val context: Context) {
         editor.putString(KEY_IMAGE_OUTPUT_FORMAT, imageOutputFormat.storageValue)
         editor.putInt(KEY_JPEG_QUALITY, jpegQuality)
         editor.putBoolean(KEY_XPAN_MODE, isXpanMode)
+        editor.putFloat(KEY_XPAN_ASPECT_RATIO, xpanAspectRatio)
         editor.putString(KEY_XPAN_UI_LAYOUT, xpanUiLayout.storageValue)
         editor.putString(KEY_XPAN_METERING_MODE, xpanMeteringMode.storageValue)
         editor.putString(KEY_XPAN_INSTRUMENT_THEME, xpanInstrumentTheme.storageValue)
@@ -201,6 +205,7 @@ class AppSettings(private val context: Context) {
         private const val KEY_IMAGE_OUTPUT_FORMAT = "image_output_format"
         private const val KEY_JPEG_QUALITY = "jpeg_quality"
         private const val KEY_XPAN_MODE = "xpan_mode"
+        private const val KEY_XPAN_ASPECT_RATIO = "xpan_aspect_ratio"
         private const val KEY_XPAN_UI_LAYOUT = "xpan_ui_layout"
         private const val KEY_XPAN_METERING_MODE = "xpan_metering_mode"
         private const val KEY_XPAN_INSTRUMENT_THEME = "xpan_instrument_theme"

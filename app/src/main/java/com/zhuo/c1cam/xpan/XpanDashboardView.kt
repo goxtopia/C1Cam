@@ -53,6 +53,7 @@ class XpanDashboardView @JvmOverloads constructor(
     private var histogram = FloatArray(64)
     private var instrumentTheme = XpanInstrumentTheme.GREEN
     private var uiLayout = XpanUiLayout.SCHEME_1
+    private var frameRatioLabel = "65:24"
 
     fun setActive(active: Boolean) {
         if (isActive == active) return
@@ -79,6 +80,12 @@ class XpanDashboardView @JvmOverloads constructor(
     fun setUiLayout(layout: XpanUiLayout) {
         if (uiLayout == layout) return
         uiLayout = layout
+        postInvalidateOnAnimation()
+    }
+
+    fun setFrameRatioLabel(label: String) {
+        if (frameRatioLabel == label) return
+        frameRatioLabel = label
         postInvalidateOnAnimation()
     }
 
@@ -170,7 +177,7 @@ class XpanDashboardView @JvmOverloads constructor(
         textPaint.textSize = sp(11f)
         textPaint.letterSpacing = 0.15f
         textPaint.textAlign = Paint.Align.LEFT
-        canvas.drawText("XPAN  ·  65:24", left, baseline, textPaint)
+        canvas.drawText("XPAN  ·  $frameRatioLabel", left, baseline, textPaint)
 
         textPaint.color = Color.argb(150, 246, 247, 248)
         textPaint.textSize = sp(8.5f)
@@ -192,7 +199,7 @@ class XpanDashboardView @JvmOverloads constructor(
         textPaint.color = instrumentTheme.accent
         textPaint.textSize = sp(9f)
         textPaint.letterSpacing = 0.15f
-        canvas.drawText("XPAN  ·  65:24", left, centerY - dp(19f), textPaint)
+        canvas.drawText("XPAN  ·  $frameRatioLabel", left, centerY - dp(19f), textPaint)
 
         textPaint.color = Color.argb(155, 239, 243, 238)
         textPaint.textSize = sp(6.2f)
@@ -206,7 +213,12 @@ class XpanDashboardView @JvmOverloads constructor(
         textPaint.color = Color.argb(125, 239, 243, 238)
         textPaint.textSize = sp(5.4f)
         textPaint.letterSpacing = 0.11f
-        canvas.drawText("C1 OPTICAL SYSTEM  /  FRAME 65 × 24", left, centerY + dp(21f), textPaint)
+        canvas.drawText(
+            "C1 OPTICAL SYSTEM  /  FRAME ${frameRatioLabel.replace(":", " × ")}",
+            left,
+            centerY + dp(21f),
+            textPaint
+        )
         canvas.restore()
     }
 

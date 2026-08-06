@@ -79,6 +79,19 @@ class XpanMeteringModeTest {
     }
 
     @Test
+    fun softwareMeteringTracksTheConfiguredFrameRatio() {
+        val frame = XpanSoftwareMeteringModel.frameFor(
+            imageWidth = 640,
+            imageHeight = 360,
+            aspectRatio = 1f
+        )
+
+        assertEquals(frame.width, frame.height)
+        assertTrue(frame.left > 0)
+        assertTrue(frame.right < 640)
+    }
+
+    @Test
     fun averageWeightIsUniformAcrossTheFrame() {
         assertEquals(1f, XpanSoftwareMeteringModel.sampleWeight(
             XpanMeteringMode.AVERAGE, 0.05f, 0.05f
