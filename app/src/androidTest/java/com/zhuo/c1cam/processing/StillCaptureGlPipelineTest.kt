@@ -18,7 +18,82 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class StillCaptureGlPipelineTest {
     @Test
+    fun liveSurfaceMatchesXpanCropForAllRightAngleOrientations() {
+        val instrumentation = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val activity = instrumentation.startActivitySync(android.content.Intent(context,
+            com.zhuo.c1cam.ui.MainActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+        val source = Bitmap.createBitmap(96, 64, Bitmap.Config.ARGB_8888)
+        for (y in 0 until 64) for (x in 0 until 96) source.setPixel(x, y, when {
+            y < 14 || y >= 50 -> Color.MAGENTA // Must be cropped out, not fitted inside the view.
+            y < 32 && x < 48 -> Color.RED
+            y < 32 -> Color.GREEN
+            x < 48 -> Color.BLUE
+            else -> Color.YELLOW
+        })
+        val bytes = ByteArrayOutputStream().also { source.compress(Bitmap.CompressFormat.JPEG, 100, it) }
+            .toByteArray()
+        lateinit var display: LivePreviewGlView
+        try {
+            instrumentation.runOnMainSync {
+                display = LivePreviewGlView(activity)
+                activity.addContentView(display, android.widget.FrameLayout.LayoutParams(96, 35))
+                display.setActive(true)
+            }
+            val expected = listOf(
+                listOf(Color.RED, Color.GREEN, Color.BLUE, Color.YELLOW),
+                listOf(Color.BLUE, Color.RED, Color.YELLOW, Color.GREEN),
+                listOf(Color.YELLOW, Color.BLUE, Color.GREEN, Color.RED),
+                listOf(Color.GREEN, Color.YELLOW, Color.RED, Color.BLUE)
+            )
+            listOf(0, 90, 180, 270).forEachIndexed { index, rotation ->
+                val geometry = com.zhuo.c1cam.camera.PreviewFrameGeometry.forXpan(96, 64, rotation,
+                    com.zhuo.c1cam.xpan.XpanMode.ASPECT_RATIO)
+                val before = display.renderedFrames
+                instrumentation.runOnMainSync {
+                    display.layoutParams = android.widget.FrameLayout.LayoutParams(
+                        geometry.outputWidth, geometry.outputHeight)
+                    display.submit(TestImage(ImageFormat.JPEG, 96, 64, arrayOf(plane(bytes, 96))), geometry, null)
+                }
+                val deadline = android.os.SystemClock.elapsedRealtime() + 10_000
+                while (display.renderedFrames <= before && android.os.SystemClock.elapsedRealtime() < deadline) {
+                    android.os.SystemClock.sleep(20)
+                }
+                assertTrue(display.renderedFrames > before)
+                instrumentation.runOnMainSync { display.requestRender() }
+                android.os.SystemClock.sleep(150)
+                val copy = Bitmap.createBitmap(geometry.outputWidth, geometry.outputHeight, Bitmap.Config.ARGB_8888)
+                try {
+                    val done = java.util.concurrent.CountDownLatch(1)
+                    var result = -1
+                    instrumentation.runOnMainSync {
+                        android.view.PixelCopy.request(display, copy, { status -> result = status; done.countDown() },
+                            android.os.Handler(android.os.Looper.getMainLooper()))
+                    }
+                    assertTrue(done.await(5, java.util.concurrent.TimeUnit.SECONDS))
+                    assertEquals(android.view.PixelCopy.SUCCESS, result)
+                    assertColor(expected[index][0], copy.getPixel(copy.width / 4, copy.height / 4))
+                    assertColor(expected[index][1], copy.getPixel(copy.width * 3 / 4, copy.height / 4))
+                    assertColor(expected[index][2], copy.getPixel(copy.width / 4, copy.height * 3 / 4))
+                    assertColor(expected[index][3], copy.getPixel(copy.width * 3 / 4, copy.height * 3 / 4))
+                } finally {
+                    copy.recycle()
+                }
+            }
+        } finally {
+            source.recycle()
+            instrumentation.runOnMainSync { activity.finish() }
+            instrumentation.waitForIdleSync()
+            awaitDestroyed(activity)
+        }
+    }
+
+    @Test
     fun jpegUsesGpuAndPreservesColorsAndOrientationAcrossInputSwitches() {
+        val instrumentation = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val activity = instrumentation.startActivitySync(android.content.Intent(context,
+            com.zhuo.c1cam.ui.MainActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
         val source = Bitmap.createBitmap(64, 96, Bitmap.Config.ARGB_8888)
         for (y in 0 until source.height) for (x in 0 until source.width) {
             source.setPixel(x, y, when {
@@ -65,7 +140,18 @@ class StillCaptureGlPipelineTest {
         } finally {
             source.recycle()
             StillCaptureGlPipeline.release()
+            instrumentation.runOnMainSync { activity.finish() }
+            instrumentation.waitForIdleSync()
+            awaitDestroyed(activity)
         }
+    }
+
+    private fun awaitDestroyed(activity: android.app.Activity) {
+        val deadline = android.os.SystemClock.elapsedRealtime() + 5000
+        while (!activity.isDestroyed && android.os.SystemClock.elapsedRealtime() < deadline) {
+            android.os.SystemClock.sleep(20)
+        }
+        assertTrue(activity.isDestroyed)
     }
 
     private fun render(image: ImageProxy, rotation: Int, mode: ChromaDenoiseMode): Bitmap {

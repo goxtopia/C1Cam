@@ -10,6 +10,7 @@ import com.zhuo.c1cam.capture.CaptureMetadata
 import com.zhuo.c1cam.capture.CaptureProcessingStage
 import com.zhuo.c1cam.capture.CaptureProcessingStatus
 import com.zhuo.c1cam.capture.CaptureProcessingTracker
+import com.zhuo.c1cam.processing.LivePreviewGlView
 import com.zhuo.c1cam.processing.GlRectificationUtils
 import com.zhuo.c1cam.processing.ImageProcessor
 import com.zhuo.c1cam.processing.Lut3D
@@ -123,7 +124,11 @@ class CameraManager(
     private val rawImageWriter = RawImageWriter(activity)
     private val frameResults = FrameResultStore<TotalCaptureResult>()
     private var rawCharacteristics: CameraCharacteristics? = null
-    private var rawAnalysisPreview: ImageView? = null
+    private var rawAnalysisPreview: LivePreviewGlView? = null
+    private var rectifiedGlPreview: LivePreviewGlView? = null
+    private var rawBitmapPreview: ImageView? = null
+    private var gpuPreviewEnabled = (activity.getSystemService(android.content.Context.ACTIVITY_SERVICE)
+        as android.app.ActivityManager).deviceConfigurationInfo.reqGlEsVersion >= 0x30000
     private val captureProcessingExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private val captureSaveExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private val captureInFlightLimiter = CaptureInFlightLimiter(MAX_CAPTURES_IN_FLIGHT)
@@ -205,61 +210,66 @@ class CameraManager(
                     analysisWidth = if (appSettings.isXpanMode) XpanMode.PREVIEW_WIDTH else 1280,
                     analysisHeight = if (appSettings.isXpanMode) XpanMode.PREVIEW_HEIGHT else 720)
             } else requestedAnalysisPolicy
-            configureRawAnalysisPreview(useAnalysisPreview && appSettings.isXpanMode)
+            val glPreview = configureGlPreview(
+                rawXpan = useAnalysisPreview && appSettings.isXpanMode,
+                rectified = !appSettings.isXpanMode && appSettings.previewDisplayMode == PreviewDisplayMode.RECTIFIED
+            )
             val imageAnalysisUseCase = createImageAnalysis(previewAnalysisPolicy)
             imageAnalysis = imageAnalysisUseCase
             analysisFrameCounter = 0L
 
             imageAnalysisUseCase.setAnalyzer(cameraExecutor) { imageProxy ->
-                val frameIndex = ++analysisFrameCounter
-                updateLatestPreviewSourceAspectRatio(PreviewFrameAspectRatioModel.fromFrame(
-                    width = imageProxy.width,
-                    height = imageProxy.height,
-                    rotationDegrees = imageProxy.imageInfo.rotationDegrees
-                ))
-                if (!previewAnalysisPolicy.shouldProcessFrame(frameIndex)) {
-                    imageProxy.close()
-                    return@setAnalyzer
-                }
-
-                if (appSettings.isXpanMode) {
-                    val lumaAnalysis = analyzeXpanLuma(imageProxy)
-                    latestHistogram = lumaAnalysis.histogram
-                    updateXpanSoftwareMetering(lumaAnalysis.meteredLuma)
-                    dispatchCameraTelemetry()
-                    if (useAnalysisPreview) {
-                        runCatching { showRawAnalysisPreview(imageProxy) }
-                            .onFailure { Log.w("CameraManager", "RAW preview frame skipped", it) }
-                    }
-                    imageProxy.close()
-                    return@setAnalyzer
-                }
-
-                val points = overlay.getNormalizedPoints()
-                val viewW = viewFinder.width
-                val viewH = viewFinder.height
-
-                if (points.size == 4 && viewW > 0 && viewH > 0) {
-                    val finalPreview = imageProcessor.processForPreview(
-                        imageProxy,
-                        points,
-                        viewW,
-                        viewH,
-                        appSettings.targetAspectRatio,
-                        lutProvider(),
-                        appSettings.isCropModeOff,
-                        appSettings.focalLength,
-                        appSettings.noCropAspectRatio
-                    )
-
-                    activity.runOnUiThread {
-                        if (appSettings.previewDisplayMode == PreviewDisplayMode.RECTIFIED) {
-                            previewRectified.setImageBitmap(finalPreview)
+                var handedToDisplay = false
+                try {
+                    val frameIndex = ++analysisFrameCounter
+                    updateLatestPreviewSourceAspectRatio(PreviewFrameAspectRatioModel.fromFrame(
+                        imageProxy.width, imageProxy.height, imageProxy.imageInfo.rotationDegrees))
+                    val analyzeFrame = previewAnalysisPolicy.shouldProcessFrame(frameIndex)
+                    if (appSettings.isXpanMode) {
+                        if (analyzeFrame) {
+                            val lumaAnalysis = analyzeXpanLuma(imageProxy)
+                            latestHistogram = lumaAnalysis.histogram
+                            updateXpanSoftwareMetering(lumaAnalysis.meteredLuma)
+                            dispatchCameraTelemetry()
                         }
+                        // Metering can run at a lower rate; the viewfinder displays every frame.
+                        if (useAnalysisPreview && glPreview != null) {
+                            val geometry = PreviewFrameGeometry.forXpan(imageProxy.width, imageProxy.height,
+                                imageProxy.imageInfo.rotationDegrees, appSettings.xpanAspectRatio)
+                            handedToDisplay = true
+                            glPreview.submit(imageProxy, geometry, null)
+                        } else if (useAnalysisPreview && analyzeFrame) {
+                            showBitmapPreviewFallback(imageProxy)
+                        }
+                        return@setAnalyzer
                     }
+                    if (!analyzeFrame) return@setAnalyzer
+                    val points = overlay.getNormalizedPoints()
+                    val viewW = viewFinder.width
+                    val viewH = viewFinder.height
+                    if (points.size != 4 || viewW <= 0 || viewH <= 0) return@setAnalyzer
+                    if (glPreview == null) {
+                        val bitmap = imageProcessor.processForPreview(imageProxy, points, viewW, viewH,
+                            appSettings.targetAspectRatio, lutProvider(), appSettings.isCropModeOff,
+                            appSettings.focalLength, appSettings.noCropAspectRatio)
+                        activity.runOnUiThread {
+                            if (appSettings.previewDisplayMode == PreviewDisplayMode.RECTIFIED) {
+                                previewRectified.setImageBitmap(bitmap)
+                            }
+                        }
+                        return@setAnalyzer
+                    }
+                    val geometry = StillCaptureGeometry.create(imageProxy.width, imageProxy.height,
+                        imageProxy.imageInfo.rotationDegrees, points, viewW, viewH,
+                        appSettings.targetAspectRatio, appSettings.isCropModeOff,
+                        appSettings.focalLength, appSettings.noCropAspectRatio, 0)
+                    handedToDisplay = true
+                    checkNotNull(glPreview).submit(imageProxy, geometry, lutProvider())
+                } catch (error: Exception) {
+                    Log.w("CameraManager", "Preview frame skipped", error)
+                } finally {
+                    if (!handedToDisplay) imageProxy.close()
                 }
-
-                imageProxy.close()
             }
 
             try {
@@ -284,7 +294,8 @@ class CameraManager(
                 if (useRaw) {
                     // Some RAW cameras cannot combine RAW/JPEG with live analysis.
                     rawCharacteristics = null
-                    configureRawAnalysisPreview(false)
+                    configureGlPreview(rawXpan = false, rectified = !appSettings.isXpanMode &&
+                        appSettings.previewDisplayMode == PreviewDisplayMode.RECTIFIED)
                     val fallback = ImageCapture.Builder()
                         .useYuvBuffer()
                         .setTargetRotation(targetRotation)
@@ -319,32 +330,72 @@ class CameraManager(
     private fun ImageCapture.Builder.useYuvBuffer(): ImageCapture.Builder =
         setBufferFormat(ImageFormat.YUV_420_888)
 
-    private fun configureRawAnalysisPreview(visible: Boolean) {
-        if (visible && rawAnalysisPreview == null) {
+    private fun configureGlPreview(rawXpan: Boolean, rectified: Boolean): LivePreviewGlView? {
+        if (rawXpan && gpuPreviewEnabled && rawAnalysisPreview == null) {
             val parent = viewFinder.parent as ViewGroup
-            rawAnalysisPreview = ImageView(activity).apply {
-                scaleType = ImageView.ScaleType.FIT_CENTER
-                setBackgroundColor(android.graphics.Color.BLACK)
-                parent.addView(this, parent.indexOfChild(viewFinder) + 1,
+            rawAnalysisPreview = LivePreviewGlView(activity).also {
+                setPreviewFailureHandler(it)
+                parent.addView(it, parent.indexOfChild(viewFinder) + 1,
                     ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT))
             }
         }
+        if (rectified && gpuPreviewEnabled && rectifiedGlPreview == null) {
+            val parent = previewRectified.parent as ViewGroup
+            rectifiedGlPreview = LivePreviewGlView(activity).also { display ->
+                setPreviewFailureHandler(display)
+                parent.addView(display, parent.indexOfChild(previewRectified) + 1,
+                    ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT))
+                display.setOnTouchListener { _, event -> previewRectified.dispatchTouchEvent(event) }
+            }
+        }
         rawAnalysisPreview?.apply {
-            visibility = if (visible) View.VISIBLE else View.GONE
-            if (!visible) setImageDrawable(null)
+            setActive(rawXpan && gpuPreviewEnabled)
+            visibility = if (rawXpan && gpuPreviewEnabled) View.VISIBLE else View.GONE
+        }
+        rectifiedGlPreview?.apply {
+            setActive(rectified && gpuPreviewEnabled)
+            visibility = if (rectified && gpuPreviewEnabled) View.VISIBLE else View.GONE
+        }
+        val bitmapFallback = rawXpan && !gpuPreviewEnabled
+        if (bitmapFallback && rawBitmapPreview == null) {
+            val parent = viewFinder.parent as ViewGroup
+            rawBitmapPreview = ImageView(activity).also {
+                it.scaleType = ImageView.ScaleType.CENTER_CROP
+                parent.addView(it, parent.indexOfChild(viewFinder) + 1,
+                    ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT))
+            }
+        }
+        rawBitmapPreview?.apply {
+            visibility = if (bitmapFallback) View.VISIBLE else View.GONE
+            if (!bitmapFallback) setImageDrawable(null)
+        }
+        if (rectified) previewRectified.visibility = if (gpuPreviewEnabled) View.INVISIBLE else View.VISIBLE
+        return if (!gpuPreviewEnabled) null else if (rawXpan) rawAnalysisPreview
+            else if (rectified) rectifiedGlPreview else null
+    }
+
+    private fun setPreviewFailureHandler(display: LivePreviewGlView) {
+        display.onRenderFailure = {
+            activity.runOnUiThread {
+                if (gpuPreviewEnabled && !activity.isDestroyed) {
+                    gpuPreviewEnabled = false
+                    startCamera()
+                }
+            }
         }
     }
 
-    private fun showRawAnalysisPreview(image: ImageProxy) {
+    private fun showBitmapPreviewFallback(image: ImageProxy) {
         val bitmap = image.toBitmap()
         val degrees = image.imageInfo.rotationDegrees
-        val upright = if (degrees == 0) bitmap else {
-            Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height,
-                Matrix().apply { postRotate(degrees.toFloat()) }, true).also { bitmap.recycle() }
-        }
+        val upright = if (degrees == 0) bitmap else Bitmap.createBitmap(bitmap, 0, 0,
+            bitmap.width, bitmap.height, Matrix().apply { postRotate(degrees.toFloat()) }, true)
+            .also { bitmap.recycle() }
         activity.runOnUiThread {
-            rawAnalysisPreview?.takeIf { it.visibility == View.VISIBLE }?.setImageBitmap(upright)
+            rawBitmapPreview?.takeIf { it.visibility == View.VISIBLE }?.setImageBitmap(upright)
         }
     }
 
@@ -1240,6 +1291,8 @@ class CameraManager(
     }
 
     fun shutdown() {
+        rawAnalysisPreview?.setActive(false)
+        rectifiedGlPreview?.setActive(false)
         shutdownExecutor(cameraExecutor)
         shutdownExecutor(captureCallbackExecutor)
         shutdownExecutor(rawSaveExecutor)

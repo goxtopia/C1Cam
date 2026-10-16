@@ -178,12 +178,12 @@ class FocusModeTest {
     }
 
     @Test
-    fun rectified_preview_policy_prefers_highest_quality_analysis() {
+    fun rectified_preview_policy_bounds_resolution_for_interactive_rendering() {
         val policy = PreviewAnalysisPolicy.forMode(PreviewDisplayMode.RECTIFIED)
 
-        assertTrue(policy.useHighestAvailableResolution)
-        assertEquals(0, policy.analysisWidth)
-        assertEquals(0, policy.analysisHeight)
+        assertFalse(policy.useHighestAvailableResolution)
+        assertEquals(1280, policy.analysisWidth)
+        assertEquals(720, policy.analysisHeight)
         assertEquals(1, policy.processEveryNthFrame)
     }
 

@@ -91,10 +91,19 @@ class CameraCaptureIntegrationTest {
                         waitUntil(10_000) {
                             var ready = false
                             instrumentation.runOnMainSync {
-                                val image = if (xpan) field(checkNotNull(manager), "rawAnalysisPreview")
-                                    as? android.widget.ImageView else
-                                    activity.findViewById<android.widget.ImageView>(R.id.preview_rectified)
-                                ready = image?.drawable != null
+                                val display = field(checkNotNull(manager),
+                                    if (xpan) "rawAnalysisPreview" else "rectifiedGlPreview")
+                                    as? com.zhuo.c1cam.processing.LivePreviewGlView
+                                ready = (display?.renderedFrames ?: 0) > 0
+                                if (ready && xpan && settings.xpanAspectRatio > 0f) {
+                                    val geometry = field(checkNotNull(display), "lastGeometry") as StillCaptureGeometry
+                                    assertEquals(settings.xpanAspectRatio,
+                                        maxOf(geometry.outputWidth, geometry.outputHeight).toFloat() /
+                                            minOf(geometry.outputWidth, geometry.outputHeight), 0.01f)
+                                    val view = activity.findViewById<View>(R.id.viewFinder)
+                                    assertEquals(view.height > view.width,
+                                        geometry.outputHeight > geometry.outputWidth)
+                                }
                             }
                             ready
                         }
@@ -145,6 +154,7 @@ class CameraCaptureIntegrationTest {
                 } finally {
                     instrumentation.runOnMainSync { activity.finish() }
                     instrumentation.waitForIdleSync()
+                    waitUntil(5_000) { activity.isDestroyed }
                 }
             }
         } finally {

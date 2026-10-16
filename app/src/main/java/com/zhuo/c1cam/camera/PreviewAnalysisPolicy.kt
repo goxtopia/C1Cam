@@ -38,9 +38,9 @@ data class PreviewAnalysisPolicy(
                     processEveryNthFrame = 0
                 )
                 PreviewDisplayMode.RECTIFIED -> PreviewAnalysisPolicy(
-                    useHighestAvailableResolution = true,
-                    analysisWidth = 0,
-                    analysisHeight = 0,
+                    useHighestAvailableResolution = false,
+                    analysisWidth = CAMERA_ANALYSIS_WIDTH,
+                    analysisHeight = CAMERA_ANALYSIS_HEIGHT,
                     processEveryNthFrame = 1
                 )
             }

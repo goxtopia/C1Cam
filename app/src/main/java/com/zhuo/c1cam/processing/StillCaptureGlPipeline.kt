@@ -20,15 +20,28 @@ import java.nio.FloatBuffer
 import kotlin.math.roundToInt
 
 /**
- * Photo-only pipeline. Live LUT preview intentionally continues to use ImageProcessor's
- * existing Bitmap renderers.
- *
- * This renderer uploads Y/U/V once and performs YUV conversion, optional chroma denoise,
- * crop/perspective correction, both orientation transforms, and LUT grading in one pass.
+ * Still capture owns an offscreen renderer. Live views own separate renderers and
+ * display surfaces, so their rendering never waits on full-resolution photo readback.
  */
 object StillCaptureGlPipeline {
-    private const val TAG = "StillCaptureGl"
-    private const val CAPTURE_PERF_TAG = "C1CapturePerf"
+    private val renderer = CaptureGlRenderer()
+
+    fun process(captureId: Long, image: ImageProxy, geometry: StillCaptureGeometry,
+        lut: Lut3D?, configuredDenoiseMode: ChromaDenoiseMode, iso: Int?): Bitmap? =
+        renderer.process(captureId, image, geometry, lut, configuredDenoiseMode, iso)
+
+    fun release() = renderer.release()
+}
+
+internal data class PreviewRenderTarget(val width: Int, val height: Int)
+
+/** Each live view and still processing worker owns its own context and buffers. */
+internal class CaptureGlRenderer(private val ownsEglContext: Boolean = true) {
+    @Volatile var renderedFrames = 0L
+        private set
+
+    private val TAG = "StillCaptureGl"
+    private val CAPTURE_PERF_TAG = "C1CapturePerf"
     private val QUAD_VERTICES = floatArrayOf(
         -1f, -1f, 0f, 0f,
         1f, -1f, 1f, 0f,
@@ -43,6 +56,7 @@ object StillCaptureGlPipeline {
     private var program = 0
     private var positionLocation = -1
     private var outputCoordLocation = -1
+    private var displayTargetLocation = -1
     private var homographyLocation = -1
     private var rgbInputLocation = -1
     private var rgbTextureId = 0
@@ -96,7 +110,8 @@ object StillCaptureGlPipeline {
         geometry: StillCaptureGeometry,
         lut: Lut3D?,
         configuredDenoiseMode: ChromaDenoiseMode,
-        iso: Int?
+        iso: Int?,
+        displayTarget: PreviewRenderTarget? = null
     ): Bitmap? {
         val isJpeg = image.format == ImageFormat.JPEG
         if (!isJpeg && image.planes.size < 3) {
@@ -111,8 +126,10 @@ object StillCaptureGlPipeline {
         val totalStartedNanos = SystemClock.elapsedRealtimeNanos()
         return try {
             val initializationStartedNanos = SystemClock.elapsedRealtimeNanos()
-            ensureEgl()
-            makeCurrent()
+            if (ownsEglContext) {
+                ensureEgl()
+                makeCurrent()
+            }
             ensureProgram()
             val initializationFinishedNanos = SystemClock.elapsedRealtimeNanos()
 
@@ -149,12 +166,16 @@ object StillCaptureGlPipeline {
             val uploadFinishedNanos = SystemClock.elapsedRealtimeNanos()
 
             val targetSetupStartedNanos = SystemClock.elapsedRealtimeNanos()
-            ensureOutputTarget(geometry.outputWidth, geometry.outputHeight)
+            if (displayTarget == null) ensureOutputTarget(geometry.outputWidth, geometry.outputHeight)
             uploadLutIfNeeded(lut)
             val targetSetupFinishedNanos = SystemClock.elapsedRealtimeNanos()
 
-            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, outputFramebufferId)
-            GLES30.glViewport(0, 0, geometry.outputWidth, geometry.outputHeight)
+            if (displayTarget == null) {
+                GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, outputFramebufferId)
+                GLES30.glViewport(0, 0, geometry.outputWidth, geometry.outputHeight)
+            } else {
+                prepareDisplayTarget(geometry, displayTarget)
+            }
             GLES30.glUseProgram(program)
 
             quadBuffer.position(0)
@@ -178,6 +199,7 @@ object StillCaptureGlPipeline {
                 quadBuffer
             )
 
+            GLES30.glUniform1i(displayTargetLocation, if (displayTarget != null) 1 else 0)
             GLES30.glUniform1i(rgbInputLocation, if (isJpeg) 1 else 0)
             bindTexture(if (isJpeg) rgbTextureId else planeTextureIds[0], 0, yTextureLocation)
             bindTexture(if (isJpeg) rgbTextureId else planeTextureIds[1], 1, uTextureLocation)
@@ -234,15 +256,16 @@ object StillCaptureGlPipeline {
             val drawSubmittedNanos = SystemClock.elapsedRealtimeNanos()
 
             val readbackStartedNanos = SystemClock.elapsedRealtimeNanos()
-            val bitmap = readOutput(geometry.outputWidth, geometry.outputHeight)
+            val bitmap = if (displayTarget == null) readOutput(geometry.outputWidth, geometry.outputHeight) else null
+            renderedFrames++
             val readbackFinishedNanos = SystemClock.elapsedRealtimeNanos()
 
             GLES30.glDisableVertexAttribArray(positionLocation)
             GLES30.glDisableVertexAttribArray(outputCoordLocation)
             GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
             GLES30.glUseProgram(0)
-            releaseCurrent()
-            Log.i(
+            if (ownsEglContext) releaseCurrent()
+            if (displayTarget == null) Log.i(
                 CAPTURE_PERF_TAG,
                 "capture=$captureId stage=gpu_complete " +
                     "totalMs=${elapsedMillis(totalStartedNanos, readbackFinishedNanos)} " +
@@ -260,7 +283,7 @@ object StillCaptureGlPipeline {
             )
             bitmap
         } catch (error: Exception) {
-            Log.w(TAG, "Merged photo pipeline failed; using legacy Bitmap path", error)
+            Log.w(TAG, "GPU image rendering failed", error)
             Log.w(
                 CAPTURE_PERF_TAG,
                 "capture=$captureId stage=gpu_fallback " +
@@ -276,6 +299,31 @@ object StillCaptureGlPipeline {
         GLES30.glActiveTexture(GLES30.GL_TEXTURE0 + unit)
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, textureId)
         GLES30.glUniform1i(uniformLocation, unit)
+    }
+
+    private fun prepareDisplayTarget(geometry: StillCaptureGeometry, target: PreviewRenderTarget) {
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+        GLES30.glViewport(0, 0, target.width, target.height)
+        GLES30.glClearColor(0f, 0f, 0f, 1f)
+        GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
+        val scale = minOf(target.width.toFloat() / geometry.outputWidth,
+            target.height.toFloat() / geometry.outputHeight)
+        val width = (geometry.outputWidth * scale).roundToInt().coerceAtLeast(1)
+        val height = (geometry.outputHeight * scale).roundToInt().coerceAtLeast(1)
+        GLES30.glViewport((target.width - width) / 2, (target.height - height) / 2, width, height)
+    }
+
+    /** The same display context retains texture bindings, uniforms and vertex pointers. */
+    fun redrawDisplay(geometry: StillCaptureGeometry, target: PreviewRenderTarget) {
+        if (program == 0 || target.width <= 0 || target.height <= 0) return
+        prepareDisplayTarget(geometry, target)
+        GLES30.glUseProgram(program)
+        GLES30.glEnableVertexAttribArray(positionLocation)
+        GLES30.glEnableVertexAttribArray(outputCoordLocation)
+        GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
+        GLES30.glDisableVertexAttribArray(positionLocation)
+        GLES30.glDisableVertexAttribArray(outputCoordLocation)
+        GLES30.glUseProgram(0)
     }
 
     private fun uploadPlane(
@@ -662,6 +710,7 @@ object StillCaptureGlPipeline {
 
         positionLocation = GLES30.glGetAttribLocation(program, "aPosition")
         outputCoordLocation = GLES30.glGetAttribLocation(program, "aOutputCoord")
+        displayTargetLocation = GLES30.glGetUniformLocation(program, "uDisplayTarget")
         homographyLocation = GLES30.glGetUniformLocation(program, "uOutputToRaw")
         rgbInputLocation = GLES30.glGetUniformLocation(program, "uRgbInput")
         yTextureLocation = GLES30.glGetUniformLocation(program, "uY")
@@ -756,8 +805,9 @@ object StillCaptureGlPipeline {
     }
 
     private fun releaseInternal() {
-        if (eglDisplay != EGL14.EGL_NO_DISPLAY) {
-            EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)
+        if (eglDisplay != EGL14.EGL_NO_DISPLAY ||
+            (!ownsEglContext && EGL14.eglGetCurrentContext() != EGL14.EGL_NO_CONTEXT)) {
+            if (ownsEglContext) EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)
             if (program != 0) GLES30.glDeleteProgram(program)
             planeTextureIds.filter { it != 0 }.forEach {
                 GLES30.glDeleteTextures(1, intArrayOf(it), 0)
@@ -772,19 +822,21 @@ object StillCaptureGlPipeline {
             if (outputFramebufferId != 0) {
                 GLES30.glDeleteFramebuffers(1, intArrayOf(outputFramebufferId), 0)
             }
-            EGL14.eglMakeCurrent(
-                eglDisplay,
-                EGL14.EGL_NO_SURFACE,
-                EGL14.EGL_NO_SURFACE,
-                EGL14.EGL_NO_CONTEXT
-            )
-            if (eglSurface != EGL14.EGL_NO_SURFACE) {
-                EGL14.eglDestroySurface(eglDisplay, eglSurface)
+            if (ownsEglContext) {
+                EGL14.eglMakeCurrent(
+                    eglDisplay,
+                    EGL14.EGL_NO_SURFACE,
+                    EGL14.EGL_NO_SURFACE,
+                    EGL14.EGL_NO_CONTEXT
+                )
+                if (eglSurface != EGL14.EGL_NO_SURFACE) {
+                    EGL14.eglDestroySurface(eglDisplay, eglSurface)
+                }
+                if (eglContext != EGL14.EGL_NO_CONTEXT) {
+                    EGL14.eglDestroyContext(eglDisplay, eglContext)
+                }
+                EGL14.eglTerminate(eglDisplay)
             }
-            if (eglContext != EGL14.EGL_NO_CONTEXT) {
-                EGL14.eglDestroyContext(eglDisplay, eglContext)
-            }
-            EGL14.eglTerminate(eglDisplay)
         }
 
         eglDisplay = EGL14.EGL_NO_DISPLAY
@@ -823,7 +875,7 @@ object StillCaptureGlPipeline {
         val filterStrength: Float
     )
 
-    private const val VERTEX_SHADER = """
+    private val VERTEX_SHADER = """
         #version 300 es
         in vec2 aPosition;
         in vec2 aOutputCoord;
@@ -834,13 +886,14 @@ object StillCaptureGlPipeline {
         }
     """
 
-    private const val FRAGMENT_SHADER = """
+    private val FRAGMENT_SHADER = """
         #version 300 es
         precision highp float;
         precision highp sampler3D;
 
         in vec2 vOutputCoord;
         uniform mat3 uOutputToRaw;
+        uniform int uDisplayTarget;
         uniform int uRgbInput;
         uniform sampler2D uY;
         uniform sampler2D uU;
@@ -942,7 +995,9 @@ object StillCaptureGlPipeline {
         }
 
         void main() {
-            vec3 projected = uOutputToRaw * vec3(vOutputCoord, 1.0);
+            vec2 outputCoord = uDisplayTarget == 1
+                ? vec2(vOutputCoord.x, 1.0 - vOutputCoord.y) : vOutputCoord;
+            vec3 projected = uOutputToRaw * vec3(outputCoord, 1.0);
             vec2 rawCoord = clamp(projected.xy / projected.z, vec2(0.0), vec2(1.0));
 
             float centerY = sampleY(rawCoord).r;
