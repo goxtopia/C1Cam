@@ -1,0 +1,37 @@
+Keystore type: PKCS12
+Keystore provider: SUN
+
+Your keystore contains 1 entry
+
+Alias name: c1cam
+Creation date: Oct 16, 2026
+Entry type: PrivateKeyEntry
+Certificate chain length: 1
+Certificate[1]:
+Owner: CN=C1Cam Open Source, OU=C1Cam, O=C1Cam, C=CN
+Issuer: CN=C1Cam Open Source, OU=C1Cam, O=C1Cam, C=CN
+Serial number: e5ffdbc646fc4c50
+Valid from: Fri Oct 16 11:33:49 CST 2026 until: Tue Mar 03 11:33:49 CST 2054
+Certificate fingerprints:
+	 SHA1: 61:36:69:AA:C6:2C:03:BD:40:7F:10:52:F8:F3:16:9F:55:54:B4:A6
+	 SHA256: 74:59:6B:5B:74:4E:0A:4D:93:FC:70:94:EC:19:C0:89:B4:9C:3B:E6:7A:13:03:C1:CD:4C:7E:63:59:9B:87:D5
+Signature algorithm name: SHA384withRSA
+Subject Public Key Algorithm: 4096-bit RSA key
+Version: 3
+
+Extensions: 
+
+#1: ObjectId: 2.5.29.14 Criticality=false
+SubjectKeyIdentifier [
+KeyIdentifier [
+0000: DB 15 4D FD 52 87 BC C1   6D 88 40 69 1E 2C 9D DB  ..M.R...m.@i.,..
+0010: 22 85 24 74                                        ".$t
+]
+]
+
+
+
+*******************************************
+*******************************************
+
+

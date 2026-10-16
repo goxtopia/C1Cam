@@ -117,8 +117,10 @@ class FocusModeTest {
 
         assertEquals(0f, rect.top, 0.0001f)
         assertEquals(1f, rect.bottom, 0.0001f)
-        assertEquals(0.16666667f, rect.left, 0.0001f)
-        assertEquals(0.8333333f, rect.right, 0.0001f)
+        // Portrait 3:2 means 2/3 inside a 3/4 source: width = (2/3)/(3/4) = 8/9.
+        assertEquals(1f / 18f, rect.left, 0.0001f)
+        assertEquals(17f / 18f, rect.right, 0.0001f)
+        assertEquals(2f / 3f, rect.width * (3f / 4f) / rect.height, 0.0001f)
     }
 
     @Test
@@ -144,9 +146,10 @@ class FocusModeTest {
             aspectRatio = 16f / 9f
         )
 
-        assertEquals(0.171875f, rect.left, 0.0001f)
+        // FIT_CENTER displays the 3/4 source at 15/16 of the 4/5 view width.
+        assertEquals(0.1484375f, rect.left, 0.0001f)
         assertEquals(0f, rect.top, 0.0001f)
-        assertEquals(0.828125f, rect.right, 0.0001f)
+        assertEquals(0.8515625f, rect.right, 0.0001f)
         assertEquals(1f, rect.bottom, 0.0001f)
     }
 

@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -13,14 +15,27 @@ android {
         applicationId = "com.zhuo.c1cam"
         minSdk = 24
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        create("release") {
+            val credentials = Properties().apply {
+                rootProject.file("signing/release.properties").inputStream().use { load(it) }
+            }
+            storeFile = rootProject.file(credentials.getProperty("storeFile"))
+            storePassword = credentials.getProperty("storePassword")
+            keyAlias = credentials.getProperty("keyAlias")
+            keyPassword = credentials.getProperty("keyPassword")
+        }
+    }
+
     buildTypes {
         release {
+            signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),

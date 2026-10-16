@@ -2,6 +2,8 @@ package com.zhuo.c1cam.processing
 
 import com.zhuo.c1cam.camera.StillCaptureGeometry
 import android.graphics.Bitmap
+import android.graphics.ImageFormat
+import android.opengl.GLUtils
 import android.opengl.EGL14
 import android.opengl.EGLConfig
 import android.opengl.EGLContext
@@ -42,6 +44,8 @@ object StillCaptureGlPipeline {
     private var positionLocation = -1
     private var outputCoordLocation = -1
     private var homographyLocation = -1
+    private var rgbInputLocation = -1
+    private var rgbTextureId = 0
     private var yTextureLocation = -1
     private var uTextureLocation = -1
     private var vTextureLocation = -1
@@ -94,7 +98,8 @@ object StillCaptureGlPipeline {
         configuredDenoiseMode: ChromaDenoiseMode,
         iso: Int?
     ): Bitmap? {
-        if (image.planes.size < 3) {
+        val isJpeg = image.format == ImageFormat.JPEG
+        if (!isJpeg && image.planes.size < 3) {
             Log.w(
                 CAPTURE_PERF_TAG,
                 "capture=$captureId stage=gpu_fallback " +
@@ -117,34 +122,31 @@ object StillCaptureGlPipeline {
             val chromaHeight = (rawHeight + 1) / 2
 
             val uploadStartedNanos = SystemClock.elapsedRealtimeNanos()
-            val yUpload = uploadPlane(
-                index = 0,
-                plane = image.planes[0],
-                width = rawWidth,
-                height = rawHeight,
-                defaultValue = 0
-            )
-            val uUpload = uploadPlane(
-                index = 1,
-                plane = image.planes[1],
-                width = chromaWidth,
-                height = chromaHeight,
-                defaultValue = 128
-            )
-            val vUpload = uploadPlane(
-                index = 2,
-                plane = image.planes[2],
-                width = chromaWidth,
-                height = chromaHeight,
-                defaultValue = 128
-            )
+            var planePackNanos = 0L
+            var textureUploadNanos = 0L
+            if (isJpeg) {
+                // Decode once, then keep crop, denoise, orientation and LUT on the GPU.
+                val bitmap = image.toBitmap()
+                try {
+                    if (rgbTextureId == 0) rgbTextureId = createTexture2d()
+                    GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+                    GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, rgbTextureId)
+                    GLUtils.texImage2D(GLES30.GL_TEXTURE_2D, 0, bitmap, 0)
+                    checkGlError("upload JPEG bitmap")
+                } finally {
+                    bitmap.recycle()
+                }
+                textureUploadNanos = SystemClock.elapsedRealtimeNanos() - uploadStartedNanos
+            } else {
+                val uploads = listOf(
+                    uploadPlane(0, image.planes[0], rawWidth, rawHeight, 0),
+                    uploadPlane(1, image.planes[1], chromaWidth, chromaHeight, 128),
+                    uploadPlane(2, image.planes[2], chromaWidth, chromaHeight, 128)
+                )
+                planePackNanos = uploads.sumOf { it.packNanos }
+                textureUploadNanos = uploads.sumOf { it.textureUploadNanos }
+            }
             val uploadFinishedNanos = SystemClock.elapsedRealtimeNanos()
-            val planePackNanos =
-                yUpload.packNanos + uUpload.packNanos + vUpload.packNanos
-            val textureUploadNanos =
-                yUpload.textureUploadNanos +
-                    uUpload.textureUploadNanos +
-                    vUpload.textureUploadNanos
 
             val targetSetupStartedNanos = SystemClock.elapsedRealtimeNanos()
             ensureOutputTarget(geometry.outputWidth, geometry.outputHeight)
@@ -176,9 +178,10 @@ object StillCaptureGlPipeline {
                 quadBuffer
             )
 
-            bindTexture(planeTextureIds[0], 0, yTextureLocation)
-            bindTexture(planeTextureIds[1], 1, uTextureLocation)
-            bindTexture(planeTextureIds[2], 2, vTextureLocation)
+            GLES30.glUniform1i(rgbInputLocation, if (isJpeg) 1 else 0)
+            bindTexture(if (isJpeg) rgbTextureId else planeTextureIds[0], 0, yTextureLocation)
+            bindTexture(if (isJpeg) rgbTextureId else planeTextureIds[1], 1, uTextureLocation)
+            bindTexture(if (isJpeg) rgbTextureId else planeTextureIds[2], 2, vTextureLocation)
             GLES30.glUniformMatrix3fv(
                 homographyLocation,
                 1,
@@ -216,6 +219,9 @@ object StillCaptureGlPipeline {
 
             GLES30.glUniform1i(hasLutLocation, if (lut != null && lutTextureId != 0) 1 else 0)
             GLES30.glUniform1f(lutSizeLocation, lut?.size?.toFloat() ?: 2f)
+            // Samplers of different types must never share a unit, even when a
+            // uniform branch disables LUT sampling for the current photo.
+            GLES30.glUniform1i(lutTextureLocation, 3)
             if (lut != null && lutTextureId != 0) {
                 GLES30.glActiveTexture(GLES30.GL_TEXTURE3)
                 GLES30.glBindTexture(GLES30.GL_TEXTURE_3D, lutTextureId)
@@ -250,9 +256,7 @@ object StillCaptureGlPipeline {
                     "output=${geometry.outputWidth}x${geometry.outputHeight} " +
                     "denoise=${configuredDenoiseMode.resolveForIso(iso).storageValue} " +
                     "lut=${lut != null} " +
-                    "planes=y:${image.planes[0].rowStride}/${image.planes[0].pixelStride}," +
-                    "u:${image.planes[1].rowStride}/${image.planes[1].pixelStride}," +
-                    "v:${image.planes[2].rowStride}/${image.planes[2].pixelStride}"
+                    "planes=${image.planes.joinToString { "${it.rowStride}/${it.pixelStride}" }}"
             )
             bitmap
         } catch (error: Exception) {
@@ -659,6 +663,7 @@ object StillCaptureGlPipeline {
         positionLocation = GLES30.glGetAttribLocation(program, "aPosition")
         outputCoordLocation = GLES30.glGetAttribLocation(program, "aOutputCoord")
         homographyLocation = GLES30.glGetUniformLocation(program, "uOutputToRaw")
+        rgbInputLocation = GLES30.glGetUniformLocation(program, "uRgbInput")
         yTextureLocation = GLES30.glGetUniformLocation(program, "uY")
         uTextureLocation = GLES30.glGetUniformLocation(program, "uU")
         vTextureLocation = GLES30.glGetUniformLocation(program, "uV")
@@ -757,6 +762,7 @@ object StillCaptureGlPipeline {
             planeTextureIds.filter { it != 0 }.forEach {
                 GLES30.glDeleteTextures(1, intArrayOf(it), 0)
             }
+            if (rgbTextureId != 0) GLES30.glDeleteTextures(1, intArrayOf(rgbTextureId), 0)
             if (outputTextureId != 0) {
                 GLES30.glDeleteTextures(1, intArrayOf(outputTextureId), 0)
             }
@@ -785,6 +791,7 @@ object StillCaptureGlPipeline {
         eglContext = EGL14.EGL_NO_CONTEXT
         eglSurface = EGL14.EGL_NO_SURFACE
         program = 0
+        rgbTextureId = 0
         planeTextureIds.fill(0)
         planeTextureWidths.fill(0)
         planeTextureHeights.fill(0)
@@ -834,6 +841,7 @@ object StillCaptureGlPipeline {
 
         in vec2 vOutputCoord;
         uniform mat3 uOutputToRaw;
+        uniform int uRgbInput;
         uniform sampler2D uY;
         uniform sampler2D uU;
         uniform sampler2D uV;
@@ -855,6 +863,26 @@ object StillCaptureGlPipeline {
         uniform float uLutSize;
         out vec4 fragColor;
 
+        vec4 sampleY(vec2 coord) {
+            vec4 pixel = texture(uY, coord);
+            if (uRgbInput == 0) return pixel;
+            return vec4(dot(pixel.rgb, vec3(0.299, 0.587, 0.114)));
+        }
+
+        vec4 sampleU(vec2 coord) {
+            if (uRgbInput == 0) return texture(uU, coord);
+            vec3 rgb = texture(uY, coord).rgb;
+            float y = dot(rgb, vec3(0.299, 0.587, 0.114));
+            return vec4((rgb.b - y) / 1.772 + 0.5);
+        }
+
+        vec4 sampleV(vec2 coord) {
+            if (uRgbInput == 0) return texture(uV, coord);
+            vec3 rgb = texture(uY, coord).rgb;
+            float y = dot(rgb, vec3(0.299, 0.587, 0.114));
+            return vec4((rgb.r - y) / 1.402 + 0.5);
+        }
+
         vec3 yuvToRgb(float y, float u, float v) {
             u -= 0.5;
             v -= 0.5;
@@ -870,27 +898,19 @@ object StillCaptureGlPipeline {
         }
 
         float lumaGuide(vec2 coord) {
-            float center = texture(uY, coord).r;
+            float center = sampleY(coord).r;
             if (uFilteredLumaGuideEnabled == 0) {
                 return center;
             }
 
             vec2 texel = 1.0 / uLumaSize;
-            float left = texture(
-                uY,
-                clamp(coord - vec2(texel.x, 0.0), vec2(0.0), vec2(1.0))
+            float left = sampleY(clamp(coord - vec2(texel.x, 0.0), vec2(0.0), vec2(1.0))
             ).r;
-            float right = texture(
-                uY,
-                clamp(coord + vec2(texel.x, 0.0), vec2(0.0), vec2(1.0))
+            float right = sampleY(clamp(coord + vec2(texel.x, 0.0), vec2(0.0), vec2(1.0))
             ).r;
-            float up = texture(
-                uY,
-                clamp(coord - vec2(0.0, texel.y), vec2(0.0), vec2(1.0))
+            float up = sampleY(clamp(coord - vec2(0.0, texel.y), vec2(0.0), vec2(1.0))
             ).r;
-            float down = texture(
-                uY,
-                clamp(coord + vec2(0.0, texel.y), vec2(0.0), vec2(1.0))
+            float down = sampleY(clamp(coord + vec2(0.0, texel.y), vec2(0.0), vec2(1.0))
             ).r;
 
             const float guideSigma = 0.075;
@@ -925,9 +945,9 @@ object StillCaptureGlPipeline {
             vec3 projected = uOutputToRaw * vec3(vOutputCoord, 1.0);
             vec2 rawCoord = clamp(projected.xy / projected.z, vec2(0.0), vec2(1.0));
 
-            float centerY = texture(uY, rawCoord).r;
-            float centerU = texture(uU, rawCoord).r;
-            float centerV = texture(uV, rawCoord).r;
+            float centerY = sampleY(rawCoord).r;
+            float centerU = sampleU(rawCoord).r;
+            float centerV = sampleV(rawCoord).r;
             float centerGuideY = lumaGuide(rawCoord);
             float finalU = centerU;
             float finalV = centerV;
@@ -950,8 +970,8 @@ object StillCaptureGlPipeline {
                             vec2(1.0)
                         );
                         float neighborGuideY = lumaGuide(neighborCoord);
-                        float neighborU = texture(uU, neighborCoord).r;
-                        float neighborV = texture(uV, neighborCoord).r;
+                        float neighborU = sampleU(neighborCoord).r;
+                        float neighborV = sampleV(neighborCoord).r;
                         float distanceSquared = float(
                             offsetX * offsetX + offsetY * offsetY
                         );

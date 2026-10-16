@@ -1,0 +1,5 @@
+<resources>
+    <style name="Theme.C1Cam" parent="Base.Theme.C1Cam">
+        <item name="android:windowLightNavigationBar">false</item>
+    </style>
+</resources>

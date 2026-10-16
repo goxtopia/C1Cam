@@ -114,6 +114,8 @@ class OverlayView @JvmOverloads constructor(
     var isEditMode = false
         set(value) {
             field = value
+            selectedPointIndex = -1
+            parent?.requestDisallowInterceptTouchEvent(false)
             invalidate()
         }
 
@@ -320,16 +322,15 @@ class OverlayView @JvmOverloads constructor(
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (gestureDetector.onTouchEvent(event)) {
+        // Editing owns the whole gesture: GestureDetector.onDown consumes DOWN,
+        // so dispatching there first prevents a corner from ever being selected.
+        if (!isEditMode || !isOverlayVisible) {
+            gestureDetector.onTouchEvent(event)
             return true
         }
-
-        if (!isOverlayVisible) return false
-
-        if (!isEditMode) return true
-
-        when (event.action) {
+        when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                selectedPointIndex = -1
                 var bestDist = Float.MAX_VALUE
                 var bestIndex = -1
                 for (i in points.indices) {
@@ -344,8 +345,9 @@ class OverlayView @JvmOverloads constructor(
                 }
                 if (bestIndex != -1) {
                     selectedPointIndex = bestIndex
-                    return true
+                    parent?.requestDisallowInterceptTouchEvent(true)
                 }
+                return true
             }
             MotionEvent.ACTION_MOVE -> {
                 if (selectedPointIndex != -1) {
@@ -358,10 +360,11 @@ class OverlayView @JvmOverloads constructor(
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 selectedPointIndex = -1
+                parent?.requestDisallowInterceptTouchEvent(false)
                 return true
             }
         }
-        return false
+        return true
     }
 
     @Synchronized

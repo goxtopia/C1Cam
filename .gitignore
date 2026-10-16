@@ -25,6 +25,7 @@ render.experimental.xml
 # Keystore files
 *.jks
 *.keystore
+!signing/c1cam-release.jks
 
 # Google Services (e.g. APIs or Firebase)
 google-services.json

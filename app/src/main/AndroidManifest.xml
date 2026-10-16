@@ -16,11 +16,16 @@
         android:directBootAware="true"
         android:supportsRtl="true"
         android:theme="@style/Theme.C1Cam">
+        <property
+            android:name="android.window.PROPERTY_COMPAT_ALLOW_RESTRICTED_RESIZABILITY"
+            android:value="true" />
         <activity
             android:name=".ui.SettingsActivity"
+            android:screenOrientation="portrait"
             android:exported="false" />
         <activity
             android:name=".ui.MainActivity"
+            android:screenOrientation="portrait"
             android:showWhenLocked="true"
             android:showForAllUsers="true"
             android:turnScreenOn="true"

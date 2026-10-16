@@ -490,6 +490,11 @@ class SettingsActivity : AppCompatActivity() {
                 selected = appSettings.imageOutputFormat == ImageOutputFormat.JPEG
             ),
             Choice(
+                label = "JPG + DNG · Processed photo + original RAW (requires RAW support)",
+                outputFormat = ImageOutputFormat.JPEG_DNG,
+                selected = appSettings.imageOutputFormat == ImageOutputFormat.JPEG_DNG
+            ),
+            Choice(
                 label = "PNG · Lossless, larger files",
                 outputFormat = ImageOutputFormat.PNG,
                 selected = appSettings.imageOutputFormat == ImageOutputFormat.PNG
@@ -629,7 +634,7 @@ class SettingsActivity : AppCompatActivity() {
         noCropRatioValue.text = noCropRatioLabel(activeNoCropAspectRatio())
         lutValue.text = lutLabel(appSettings.lutName)
         toneMapValue.text = appSettings.toneMapPreset.displayName
-        outputFormatValue.text = appSettings.imageOutputFormat.name
+        outputFormatValue.text = appSettings.imageOutputFormat.displayName
         jpegQualityValue.text = appSettings.jpegQuality.toString()
         chromaDenoiseValue.text = appSettings.chromaDenoiseMode.displayName
         pixelBinningModeValue.text = appSettings.highIsoPixelBinningMode.displayName

@@ -1,6 +1,11 @@
 package com.zhuo.c1cam.camera
 
+import android.annotation.SuppressLint
+import com.zhuo.c1cam.capture.CaptureRequestQueue
 import com.zhuo.c1cam.capture.CaptureInFlightLimiter
+import com.zhuo.c1cam.capture.CaptureOutputCompletion
+import com.zhuo.c1cam.capture.FrameResultStore
+import com.zhuo.c1cam.capture.RawImageWriter
 import com.zhuo.c1cam.capture.CaptureMetadata
 import com.zhuo.c1cam.capture.CaptureProcessingStage
 import com.zhuo.c1cam.capture.CaptureProcessingStatus
@@ -19,6 +24,8 @@ import com.zhuo.c1cam.xpan.XpanMode
 import com.zhuo.c1cam.xpan.XpanSoftwareMeteringModel
 import com.zhuo.c1cam.xpan.XpanTelemetry
 import android.graphics.ImageFormat
+import android.graphics.Bitmap
+import android.graphics.Matrix
 import android.graphics.Rect
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
@@ -31,6 +38,8 @@ import android.os.SystemClock
 import android.util.Log
 import android.util.Size
 import android.view.Surface
+import android.view.View
+import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.Toast
 import androidx.annotation.OptIn
@@ -108,12 +117,20 @@ class CameraManager(
     @Volatile
     private var targetRotation: Int = Surface.ROTATION_0
     val cameraExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+    private val captureRequestQueue = CaptureRequestQueue(ContextCompat.getMainExecutor(activity))
+    private val captureCallbackExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+    private val rawSaveExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+    private val rawImageWriter = RawImageWriter(activity)
+    private val frameResults = FrameResultStore<TotalCaptureResult>()
+    private var rawCharacteristics: CameraCharacteristics? = null
+    private var rawAnalysisPreview: ImageView? = null
     private val captureProcessingExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private val captureSaveExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private val captureInFlightLimiter = CaptureInFlightLimiter(MAX_CAPTURES_IN_FLIGHT)
     private val captureProcessingTracker = CaptureProcessingTracker()
     private val captureSequence = AtomicLong(0L)
 
+    @OptIn(ExperimentalCamera2Interop::class)
     fun startCamera() {
         if (appSettings.isXpanMode) {
             xpanSoftwareMeteringCorrectionEv = 0f
@@ -148,18 +165,47 @@ class CameraManager(
             }
             preview = previewUseCase
 
+            val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+            val cameraInfo = cameraSelector.filter(cameraProvider.availableCameraInfos).firstOrNull()
+                ?: return@addListener showCaptureResult("No back camera available")
+            val rawSupported = ImageCapture.getImageCaptureCapabilities(cameraInfo)
+                .supportedOutputFormats.contains(ImageCapture.OUTPUT_FORMAT_RAW_JPEG)
+            val useRaw = appSettings.imageOutputFormat.includesRaw && rawSupported
+            rawCharacteristics = if (useRaw) {
+                val manager = activity.getSystemService(android.content.Context.CAMERA_SERVICE)
+                    as android.hardware.camera2.CameraManager
+                manager.getCameraCharacteristics(Camera2CameraInfo.from(cameraInfo).cameraId)
+            } else null
+            if (appSettings.imageOutputFormat.includesRaw && !useRaw) {
+                showCaptureResult("RAW is not supported by this camera; saving JPG only")
+            }
             val imageCaptureBuilder = ImageCapture.Builder()
-                .setBufferFormat(ImageFormat.YUV_420_888)
                 .setTargetRotation(targetRotation)
+                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+            if (useRaw) {
+                imageCaptureBuilder.setOutputFormat(ImageCapture.OUTPUT_FORMAT_RAW_JPEG)
+                    .setJpegQuality(100)
+            } else {
+                imageCaptureBuilder.useYuvBuffer()
+            }
             Camera2Interop.Extender(imageCaptureBuilder)
                 .setSessionCaptureCallback(cameraCaptureCallback)
             val imageCaptureUseCase = imageCaptureBuilder.build()
             imageCapture = imageCaptureUseCase
 
-            val previewAnalysisPolicy = PreviewAnalysisPolicy.forMode(
+            val requestedAnalysisPolicy = PreviewAnalysisPolicy.forMode(
                 appSettings.previewDisplayMode,
                 appSettings.isXpanMode
             )
+            // RAW + JPEG + analysis is a guaranteed three-stream combination at preview
+            // resolution. A fourth Preview stream is not guaranteed, even on RAW devices.
+            val useAnalysisPreview = useRaw && requestedAnalysisPolicy.processEveryNthFrame > 0
+            val previewAnalysisPolicy = if (useAnalysisPreview) {
+                requestedAnalysisPolicy.copy(useHighestAvailableResolution = false,
+                    analysisWidth = if (appSettings.isXpanMode) XpanMode.PREVIEW_WIDTH else 1280,
+                    analysisHeight = if (appSettings.isXpanMode) XpanMode.PREVIEW_HEIGHT else 720)
+            } else requestedAnalysisPolicy
+            configureRawAnalysisPreview(useAnalysisPreview && appSettings.isXpanMode)
             val imageAnalysisUseCase = createImageAnalysis(previewAnalysisPolicy)
             imageAnalysis = imageAnalysisUseCase
             analysisFrameCounter = 0L
@@ -181,6 +227,10 @@ class CameraManager(
                     latestHistogram = lumaAnalysis.histogram
                     updateXpanSoftwareMetering(lumaAnalysis.meteredLuma)
                     dispatchCameraTelemetry()
+                    if (useAnalysisPreview) {
+                        runCatching { showRawAnalysisPreview(imageProxy) }
+                            .onFailure { Log.w("CameraManager", "RAW preview frame skipped", it) }
+                    }
                     imageProxy.close()
                     return@setAnalyzer
                 }
@@ -212,18 +262,14 @@ class CameraManager(
                 imageProxy.close()
             }
 
-            val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-
             try {
                 cameraProvider.unbindAll()
 
-                camera = cameraProvider.bindToLifecycle(
-                    activity,
-                    cameraSelector,
-                    previewUseCase,
-                    imageCaptureUseCase,
-                    imageAnalysisUseCase
-                )
+                val useCases = mutableListOf<androidx.camera.core.UseCase>(imageCaptureUseCase)
+                if (!useAnalysisPreview) useCases.add(previewUseCase)
+                if (previewAnalysisPolicy.processEveryNthFrame > 0) useCases.add(imageAnalysisUseCase)
+                camera = cameraProvider.bindToLifecycle(activity, cameraSelector, *useCases.toTypedArray())
+                updatePreviewAspectRatioFromResolution()
 
                 updateCameraSettings()
                 applyFocusMode()
@@ -234,6 +280,30 @@ class CameraManager(
 
             } catch (exc: Exception) {
                 Log.e("CameraManager", "Use case binding failed", exc)
+                imageCapture = null
+                if (useRaw) {
+                    // Some RAW cameras cannot combine RAW/JPEG with live analysis.
+                    rawCharacteristics = null
+                    configureRawAnalysisPreview(false)
+                    val fallback = ImageCapture.Builder()
+                        .useYuvBuffer()
+                        .setTargetRotation(targetRotation)
+                    Camera2Interop.Extender(fallback).setSessionCaptureCallback(cameraCaptureCallback)
+                    val fallbackCapture = fallback.build()
+                    try {
+                        cameraProvider.unbindAll()
+                        camera = cameraProvider.bindToLifecycle(activity, cameraSelector,
+                            previewUseCase, fallbackCapture, imageAnalysisUseCase)
+                        imageCapture = fallbackCapture
+                        updateCameraSettings()
+                        applyFocusMode()
+                        setExposureCompensation(appSettings.evVal)
+                        showCaptureResult("RAW unavailable with this preview configuration; saving JPG only")
+                    } catch (fallbackError: Exception) {
+                        Log.e("CameraManager", "JPG fallback binding failed", fallbackError)
+                        showCaptureResult("Could not start camera")
+                    }
+                }
             }
 
         }, ContextCompat.getMainExecutor(activity))
@@ -243,6 +313,41 @@ class CameraManager(
         startCamera()
     }
 
+    // CameraX has no public YUV still-output option. Preserve the existing direct YUV
+    // GPU path with this narrowly scoped API use, verified against pinned CameraX 1.6.2.
+    @SuppressLint("RestrictedApi")
+    private fun ImageCapture.Builder.useYuvBuffer(): ImageCapture.Builder =
+        setBufferFormat(ImageFormat.YUV_420_888)
+
+    private fun configureRawAnalysisPreview(visible: Boolean) {
+        if (visible && rawAnalysisPreview == null) {
+            val parent = viewFinder.parent as ViewGroup
+            rawAnalysisPreview = ImageView(activity).apply {
+                scaleType = ImageView.ScaleType.FIT_CENTER
+                setBackgroundColor(android.graphics.Color.BLACK)
+                parent.addView(this, parent.indexOfChild(viewFinder) + 1,
+                    ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT))
+            }
+        }
+        rawAnalysisPreview?.apply {
+            visibility = if (visible) View.VISIBLE else View.GONE
+            if (!visible) setImageDrawable(null)
+        }
+    }
+
+    private fun showRawAnalysisPreview(image: ImageProxy) {
+        val bitmap = image.toBitmap()
+        val degrees = image.imageInfo.rotationDegrees
+        val upright = if (degrees == 0) bitmap else {
+            Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height,
+                Matrix().apply { postRotate(degrees.toFloat()) }, true).also { bitmap.recycle() }
+        }
+        activity.runOnUiThread {
+            rawAnalysisPreview?.takeIf { it.visibility == View.VISIBLE }?.setImageBitmap(upright)
+        }
+    }
+
     fun getLatestPreviewSourceAspectRatio(): Float = latestPreviewSourceAspectRatio
 
     fun updateTargetRotation(rotation: Int) {
@@ -250,6 +355,14 @@ class CameraManager(
         preview?.targetRotation = rotation
         imageCapture?.targetRotation = rotation
         imageAnalysis?.targetRotation = rotation
+        updatePreviewAspectRatioFromResolution()
+    }
+
+    private fun updatePreviewAspectRatioFromResolution() {
+        val info = preview?.resolutionInfo ?: return
+        updateLatestPreviewSourceAspectRatio(PreviewFrameAspectRatioModel.fromFrame(
+            info.resolution.width, info.resolution.height, info.rotationDegrees
+        ))
     }
 
     private fun updateLatestPreviewSourceAspectRatio(aspectRatio: Float) {
@@ -275,6 +388,22 @@ class CameraManager(
         val captureStartedAt = System.currentTimeMillis()
         val captureStartedElapsedNanos = SystemClock.elapsedRealtimeNanos()
         val outputFormat = appSettings.imageOutputFormat
+        val characteristics = rawCharacteristics
+        val includeRaw = capture.outputFormat == ImageCapture.OUTPUT_FORMAT_RAW_JPEG && characteristics != null
+        val completion = CaptureOutputCompletion(includeRaw) { results ->
+            captureInFlightLimiter.release()
+            publishCaptureProcessingStatus(captureProcessingTracker.complete(captureId))
+            val jpgSaved = results[CaptureOutputCompletion.Output.BITMAP] == true
+            val rawSaved = results[CaptureOutputCompletion.Output.RAW] == true
+            showCaptureResult(when {
+                includeRaw && jpgSaved && rawSaved -> "JPG + DNG saved to Gallery"
+                includeRaw && jpgSaved -> "JPG saved; DNG failed"
+                includeRaw && rawSaved -> "DNG saved; JPG failed"
+                jpgSaved && outputFormat.includesRaw -> "JPG saved (RAW unavailable)"
+                jpgSaved -> "Saved to Gallery"
+                else -> "Could not save photo"
+            })
+        }
         val jpegQuality = appSettings.jpegQuality
         val chromaDenoiseMode = appSettings.chromaDenoiseMode
         val isHighIsoPixelBinningEnabled = appSettings.isHighIsoPixelBinningEnabled
@@ -300,20 +429,66 @@ class CameraManager(
         val savedImageRotationDegrees = savedImageRotationDegreesProvider()
         latestStillCaptureMetadata = null
 
-        try {
-            capture.takePicture(
-                captureProcessingExecutor,
+        captureRequestQueue.enqueue { onImagesDelivered ->
+            // CameraX RAW/JPEG requests must finish delivering both buffers before the
+            // next hardware request, otherwise rapid shutters can lose a RAW callback.
+            val delivery = CaptureOutputCompletion(includeRaw) { onImagesDelivered() }
+            try {
+                capture.takePicture(
+                captureCallbackExecutor,
                 object : ImageCapture.OnImageCapturedCallback() {
                     override fun onError(exc: ImageCaptureException) {
-                        captureInFlightLimiter.release()
-                        publishCaptureProcessingStatus(
-                            captureProcessingTracker.complete(captureId)
-                        )
+                        completion.failPending()
+                        delivery.failPending()
                         Log.e("CameraManager", "Photo capture failed: ${exc.message}", exc)
-                        showCaptureResult("Capture failed")
                     }
 
                     override fun onCaptureSuccess(image: ImageProxy) {
+                        val output = if (image.format == ImageFormat.RAW_SENSOR) {
+                            CaptureOutputCompletion.Output.RAW
+                        } else CaptureOutputCompletion.Output.BITMAP
+                        if (!completion.start(output)) {
+                            image.close()
+                            return
+                        }
+                        delivery.start(output)
+                        delivery.finish(output, true)
+                        if (output == CaptureOutputCompletion.Output.RAW) {
+                            val timestamp = image.imageInfo.timestamp
+                            val resultFuture = frameResults.future(timestamp)
+                            try {
+                                rawSaveExecutor.execute {
+                                    val saved = try {
+                                        rawImageWriter.save(captureId, image, checkNotNull(characteristics),
+                                            resultFuture.get(5, TimeUnit.SECONDS), captureStartedAt,
+                                            savedImageRotationDegrees)
+                                    } catch (error: Exception) {
+                                        Log.e("CameraManager", "DNG save failed", error)
+                                        false
+                                    } finally {
+                                        frameResults.remove(timestamp)
+                                        image.close()
+                                    }
+                                    completion.finish(output, saved)
+                                }
+                            } catch (error: RejectedExecutionException) {
+                                frameResults.remove(timestamp)
+                                image.close()
+                                completion.finish(output, false)
+                            }
+                            return
+                        }
+                        // Keep callback dispatch free so RAW can start writing while JPG is on GPU.
+                        val metadata = latestStillCaptureMetadata ?: latestCaptureMetadata
+                        try {
+                            captureProcessingExecutor.execute { processBitmap(image, metadata) }
+                        } catch (error: RejectedExecutionException) {
+                            image.close()
+                            completion.finish(output, false)
+                        }
+                    }
+
+                    private fun processBitmap(image: ImageProxy, metadata: CaptureMetadata?) {
                         publishCaptureProcessingStatus(
                             captureProcessingTracker.update(
                                 captureId,
@@ -327,7 +502,7 @@ class CameraManager(
                                 "size=${image.width}x${image.height} " +
                                 "rotation=${image.imageInfo.rotationDegrees}"
                         )
-                        val captureMetadata = (latestStillCaptureMetadata ?: latestCaptureMetadata)?.copy(
+                        val captureMetadata = metadata?.copy(
                             capturedAtMillis = captureStartedAt,
                             equivalentFocalLengthMm = focalLength,
                             exposureCompensationEv = exposureCompensationEv
@@ -365,12 +540,8 @@ class CameraManager(
                                 savedImageRotationDegrees
                             )
                         } catch (error: Exception) {
-                            captureInFlightLimiter.release()
-                            publishCaptureProcessingStatus(
-                                captureProcessingTracker.complete(captureId)
-                            )
+                            completion.finish(CaptureOutputCompletion.Output.BITMAP, false)
                             Log.e("CameraManager", "Photo processing failed", error)
-                            showCaptureResult("Could not process photo")
                             return
                         }
 
@@ -387,32 +558,22 @@ class CameraManager(
                                 } catch (error: Exception) {
                                     Log.e("CameraManager", "Photo save failed", error)
                                     false
-                                } finally {
-                                    captureInFlightLimiter.release()
-                                    publishCaptureProcessingStatus(
-                                        captureProcessingTracker.complete(captureId)
-                                    )
                                 }
-                                showCaptureResult(
-                                    if (saved) "Saved to Gallery" else "Could not save photo"
-                                )
+                                completion.finish(CaptureOutputCompletion.Output.BITMAP, saved)
                             }
                         } catch (error: RejectedExecutionException) {
                             processedCapture.recycle()
-                            captureInFlightLimiter.release()
-                            publishCaptureProcessingStatus(
-                                captureProcessingTracker.complete(captureId)
-                            )
+                            completion.finish(CaptureOutputCompletion.Output.BITMAP, false)
                             Log.w("CameraManager", "Photo save rejected during shutdown", error)
                         }
                     }
                 }
             )
-        } catch (error: RuntimeException) {
-            captureInFlightLimiter.release()
-            publishCaptureProcessingStatus(captureProcessingTracker.complete(captureId))
-            Log.e("CameraManager", "Could not submit photo capture", error)
-            showCaptureResult("Capture failed")
+            } catch (error: RuntimeException) {
+                completion.failPending()
+                delivery.failPending()
+                Log.e("CameraManager", "Could not submit photo capture", error)
+            }
         }
     }
 
@@ -841,6 +1002,7 @@ class CameraManager(
         updateCameraSettings()
     }
 
+    @OptIn(ExperimentalCamera2Interop::class)
     private fun sliderValueToDiopter(sliderValue: Float, cameraInfo: Camera2CameraInfo): Float {
         val minDistance = cameraInfo.getCameraCharacteristic(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0f
         val maxDiopter = if (minDistance > 2.0f) minDistance else 10.0f
@@ -916,6 +1078,9 @@ class CameraManager(
                     captureIntent == CaptureRequest.CONTROL_CAPTURE_INTENT_ZERO_SHUTTER_LAG
                 ) {
                     latestStillCaptureMetadata = metadata
+                    if (rawCharacteristics != null) {
+                        result.get(CaptureResult.SENSOR_TIMESTAMP)?.let { frameResults.put(it, result) }
+                    }
                 }
 
                 val lensDistance = result.get(CaptureResult.LENS_FOCUS_DISTANCE)
@@ -1076,6 +1241,8 @@ class CameraManager(
 
     fun shutdown() {
         shutdownExecutor(cameraExecutor)
+        shutdownExecutor(captureCallbackExecutor)
+        shutdownExecutor(rawSaveExecutor)
         // Keep the save executor alive until all GPU work has had a chance to enqueue
         // its completed bitmap.
         shutdownExecutor(captureProcessingExecutor)

@@ -8,6 +8,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.ImageFormat
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.PointF
@@ -165,7 +166,7 @@ class ImageProcessor(private val context: Context) {
         return ProcessedCapture(
             captureId = captureId,
             bitmap = bitmapToSave,
-            outputFormat = outputFormat,
+            outputFormat = outputFormat.bitmapFormat,
             jpegQuality = JpegQuality.sanitize(jpegQuality),
             metadata = captureMetadata,
             processingPath = processingPath,
@@ -223,7 +224,7 @@ class ImageProcessor(private val context: Context) {
     ): Bitmap {
         val startedNanos = SystemClock.elapsedRealtimeNanos()
         val bitmap = try {
-            if (chromaDenoiseMode != ChromaDenoiseMode.OFF) {
+            if (chromaDenoiseMode != ChromaDenoiseMode.OFF && imageProxy.format == ImageFormat.YUV_420_888) {
                 ChromaNoiseReduction.process(
                     image = imageProxy,
                     configuredMode = chromaDenoiseMode,
@@ -522,7 +523,7 @@ class ImageProcessor(private val context: Context) {
             val compressionStartedNanos = SystemClock.elapsedRealtimeNanos()
             outputStream.use {
                 val compressFormat = when (outputFormat) {
-                    ImageOutputFormat.JPEG -> Bitmap.CompressFormat.JPEG
+                    ImageOutputFormat.JPEG, ImageOutputFormat.JPEG_DNG -> Bitmap.CompressFormat.JPEG
                     ImageOutputFormat.PNG -> Bitmap.CompressFormat.PNG
                 }
                 if (!bitmap.compress(

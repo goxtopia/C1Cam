@@ -620,7 +620,8 @@ class MainActivity : AppCompatActivity() {
         isRectifiedMain = appSettings.previewDisplayMode == PreviewDisplayMode.RECTIFIED
         val showCamera = appSettings.previewDisplayMode == PreviewDisplayMode.CAMERA
 
-        cameraContainer.visibility = if (showCamera) View.VISIBLE else View.GONE
+        // Keep the framing surface measured while the rectified image is displayed.
+        cameraContainer.visibility = if (showCamera) View.VISIBLE else View.INVISIBLE
         previewRectified.visibility = if (showCamera) View.GONE else View.VISIBLE
         overlay.isEnabled = showCamera
 
@@ -871,7 +872,7 @@ class MainActivity : AppCompatActivity() {
         return try {
             val dir = ensureImportedLutDir().canonicalFile
             val file = File(dir, fileName).canonicalFile
-            if (file.toPath().startsWith(dir.toPath())) file else null
+            if (file.parentFile == dir) file else null
         } catch (_: Exception) {
             null
         }
