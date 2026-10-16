@@ -10,6 +10,8 @@ import com.zhuo.c1cam.capture.CaptureMetadata
 import com.zhuo.c1cam.capture.CaptureProcessingStage
 import com.zhuo.c1cam.capture.CaptureProcessingStatus
 import com.zhuo.c1cam.capture.CaptureProcessingTracker
+import com.zhuo.c1cam.processing.LutUtils
+import com.zhuo.c1cam.processing.LocalToneMapping
 import com.zhuo.c1cam.processing.LivePreviewGlView
 import com.zhuo.c1cam.processing.GlRectificationUtils
 import com.zhuo.c1cam.processing.ImageProcessor
@@ -200,18 +202,20 @@ class CameraManager(
 
             val requestedAnalysisPolicy = PreviewAnalysisPolicy.forMode(
                 appSettings.previewDisplayMode,
-                appSettings.isXpanMode
+                appSettings.isXpanMode, appSettings.isWdrMode
             )
             // RAW + JPEG + analysis is a guaranteed three-stream combination at preview
             // resolution. A fourth Preview stream is not guaranteed, even on RAW devices.
-            val useAnalysisPreview = useRaw && requestedAnalysisPolicy.processEveryNthFrame > 0
+            val cameraWdrPreview = appSettings.isWdrMode &&
+                (appSettings.isXpanMode || appSettings.previewDisplayMode == PreviewDisplayMode.CAMERA)
+            val useAnalysisPreview = (useRaw && requestedAnalysisPolicy.processEveryNthFrame > 0) || cameraWdrPreview
             val previewAnalysisPolicy = if (useAnalysisPreview) {
                 requestedAnalysisPolicy.copy(useHighestAvailableResolution = false,
                     analysisWidth = if (appSettings.isXpanMode) XpanMode.PREVIEW_WIDTH else 1280,
                     analysisHeight = if (appSettings.isXpanMode) XpanMode.PREVIEW_HEIGHT else 720)
             } else requestedAnalysisPolicy
             val glPreview = configureGlPreview(
-                rawXpan = useAnalysisPreview && appSettings.isXpanMode,
+                cameraSurface = useAnalysisPreview && (appSettings.isXpanMode || cameraWdrPreview),
                 rectified = !appSettings.isXpanMode && appSettings.previewDisplayMode == PreviewDisplayMode.RECTIFIED
             )
             val imageAnalysisUseCase = createImageAnalysis(previewAnalysisPolicy)
@@ -237,13 +241,22 @@ class CameraManager(
                             val geometry = PreviewFrameGeometry.forXpan(imageProxy.width, imageProxy.height,
                                 imageProxy.imageInfo.rotationDegrees, appSettings.xpanAspectRatio)
                             handedToDisplay = true
-                            glPreview.submit(imageProxy, geometry, null)
+                            glPreview.submit(imageProxy, geometry, if (appSettings.isWdrMode) lutProvider() else null, appSettings.isWdrMode)
                         } else if (useAnalysisPreview && analyzeFrame) {
                             showBitmapPreviewFallback(imageProxy)
                         }
                         return@setAnalyzer
                     }
                     if (!analyzeFrame) return@setAnalyzer
+                    if (cameraWdrPreview) {
+                        if (glPreview != null) {
+                            val geometry = PreviewFrameGeometry.forCamera(imageProxy.width, imageProxy.height,
+                                imageProxy.imageInfo.rotationDegrees)
+                            handedToDisplay = true
+                            glPreview.submit(imageProxy, geometry, null, appSettings.isWdrMode)
+                        } else showBitmapPreviewFallback(imageProxy)
+                        return@setAnalyzer
+                    }
                     val points = overlay.getNormalizedPoints()
                     val viewW = viewFinder.width
                     val viewH = viewFinder.height
@@ -251,7 +264,7 @@ class CameraManager(
                     if (glPreview == null) {
                         val bitmap = imageProcessor.processForPreview(imageProxy, points, viewW, viewH,
                             appSettings.targetAspectRatio, lutProvider(), appSettings.isCropModeOff,
-                            appSettings.focalLength, appSettings.noCropAspectRatio)
+                            appSettings.focalLength, appSettings.noCropAspectRatio, appSettings.isWdrMode)
                         activity.runOnUiThread {
                             if (appSettings.previewDisplayMode == PreviewDisplayMode.RECTIFIED) {
                                 previewRectified.setImageBitmap(bitmap)
@@ -264,7 +277,7 @@ class CameraManager(
                         appSettings.targetAspectRatio, appSettings.isCropModeOff,
                         appSettings.focalLength, appSettings.noCropAspectRatio, 0)
                     handedToDisplay = true
-                    checkNotNull(glPreview).submit(imageProxy, geometry, lutProvider())
+                    checkNotNull(glPreview).submit(imageProxy, geometry, lutProvider(), appSettings.isWdrMode)
                 } catch (error: Exception) {
                     Log.w("CameraManager", "Preview frame skipped", error)
                 } finally {
@@ -294,7 +307,7 @@ class CameraManager(
                 if (useRaw) {
                     // Some RAW cameras cannot combine RAW/JPEG with live analysis.
                     rawCharacteristics = null
-                    configureGlPreview(rawXpan = false, rectified = !appSettings.isXpanMode &&
+                    configureGlPreview(cameraSurface = useAnalysisPreview && (appSettings.isXpanMode || cameraWdrPreview), rectified = !appSettings.isXpanMode &&
                         appSettings.previewDisplayMode == PreviewDisplayMode.RECTIFIED)
                     val fallback = ImageCapture.Builder()
                         .useYuvBuffer()
@@ -303,8 +316,9 @@ class CameraManager(
                     val fallbackCapture = fallback.build()
                     try {
                         cameraProvider.unbindAll()
-                        camera = cameraProvider.bindToLifecycle(activity, cameraSelector,
-                            previewUseCase, fallbackCapture, imageAnalysisUseCase)
+                        val fallbackUseCases = if (useAnalysisPreview) arrayOf(fallbackCapture, imageAnalysisUseCase)
+                            else arrayOf(previewUseCase, fallbackCapture, imageAnalysisUseCase)
+                        camera = cameraProvider.bindToLifecycle(activity, cameraSelector, *fallbackUseCases)
                         imageCapture = fallbackCapture
                         updateCameraSettings()
                         applyFocusMode()
@@ -330,8 +344,8 @@ class CameraManager(
     private fun ImageCapture.Builder.useYuvBuffer(): ImageCapture.Builder =
         setBufferFormat(ImageFormat.YUV_420_888)
 
-    private fun configureGlPreview(rawXpan: Boolean, rectified: Boolean): LivePreviewGlView? {
-        if (rawXpan && gpuPreviewEnabled && rawAnalysisPreview == null) {
+    private fun configureGlPreview(cameraSurface: Boolean, rectified: Boolean): LivePreviewGlView? {
+        if (cameraSurface && gpuPreviewEnabled && rawAnalysisPreview == null) {
             val parent = viewFinder.parent as ViewGroup
             rawAnalysisPreview = LivePreviewGlView(activity).also {
                 setPreviewFailureHandler(it)
@@ -351,14 +365,14 @@ class CameraManager(
             }
         }
         rawAnalysisPreview?.apply {
-            setActive(rawXpan && gpuPreviewEnabled)
-            visibility = if (rawXpan && gpuPreviewEnabled) View.VISIBLE else View.GONE
+            setActive(cameraSurface && gpuPreviewEnabled)
+            visibility = if (cameraSurface && gpuPreviewEnabled) View.VISIBLE else View.GONE
         }
         rectifiedGlPreview?.apply {
             setActive(rectified && gpuPreviewEnabled)
             visibility = if (rectified && gpuPreviewEnabled) View.VISIBLE else View.GONE
         }
-        val bitmapFallback = rawXpan && !gpuPreviewEnabled
+        val bitmapFallback = cameraSurface && !gpuPreviewEnabled
         if (bitmapFallback && rawBitmapPreview == null) {
             val parent = viewFinder.parent as ViewGroup
             rawBitmapPreview = ImageView(activity).also {
@@ -369,11 +383,12 @@ class CameraManager(
             }
         }
         rawBitmapPreview?.apply {
+            scaleType = if (appSettings.isXpanMode) ImageView.ScaleType.CENTER_CROP else ImageView.ScaleType.FIT_CENTER
             visibility = if (bitmapFallback) View.VISIBLE else View.GONE
             if (!bitmapFallback) setImageDrawable(null)
         }
         if (rectified) previewRectified.visibility = if (gpuPreviewEnabled) View.INVISIBLE else View.VISIBLE
-        return if (!gpuPreviewEnabled) null else if (rawXpan) rawAnalysisPreview
+        return if (!gpuPreviewEnabled) null else if (cameraSurface) rawAnalysisPreview
             else if (rectified) rectifiedGlPreview else null
     }
 
@@ -389,11 +404,17 @@ class CameraManager(
     }
 
     private fun showBitmapPreviewFallback(image: ImageProxy) {
-        val bitmap = image.toBitmap()
+        val decoded = image.toBitmap()
+        val bitmap = if (appSettings.isWdrMode && !decoded.isMutable) decoded.copy(Bitmap.Config.ARGB_8888, true).also { decoded.recycle() } else decoded
+        if (appSettings.isWdrMode) LocalToneMapping.apply(bitmap)
+        val lut = if (appSettings.isXpanMode && appSettings.isWdrMode) lutProvider() else null
+        val graded = if (lut != null) LutUtils.applyLut(bitmap, lut).also {
+            if (it !== bitmap) bitmap.recycle()
+        } else bitmap
         val degrees = image.imageInfo.rotationDegrees
-        val upright = if (degrees == 0) bitmap else Bitmap.createBitmap(bitmap, 0, 0,
-            bitmap.width, bitmap.height, Matrix().apply { postRotate(degrees.toFloat()) }, true)
-            .also { bitmap.recycle() }
+        val upright = if (degrees == 0) graded else Bitmap.createBitmap(graded, 0, 0,
+            graded.width, graded.height, Matrix().apply { postRotate(degrees.toFloat()) }, true)
+            .also { graded.recycle() }
         activity.runOnUiThread {
             rawBitmapPreview?.takeIf { it.visibility == View.VISIBLE }?.setImageBitmap(upright)
         }
@@ -457,6 +478,7 @@ class CameraManager(
         }
         val jpegQuality = appSettings.jpegQuality
         val chromaDenoiseMode = appSettings.chromaDenoiseMode
+        val wdrEnabled = appSettings.isWdrMode
         val isHighIsoPixelBinningEnabled = appSettings.isHighIsoPixelBinningEnabled
         val highIsoPixelBinningMode = appSettings.highIsoPixelBinningMode
         val highIsoPixelBinningThreshold = appSettings.highIsoPixelBinningThreshold
@@ -474,7 +496,9 @@ class CameraManager(
             appSettings.noCropAspectRatio,
             appSettings.xpanAspectRatio
         )
-        val exposureCompensationEv = appSettings.evVal
+        val exposureCompensationEv = camera?.cameraInfo?.exposureState?.let {
+            it.exposureCompensationIndex * it.exposureCompensationStep.toFloat()
+        } ?: appSettings.evVal
         // Freeze orientation at shutter press; sensor changes during processing must not
         // alter the direction of the photo being saved.
         val savedImageRotationDegrees = savedImageRotationDegreesProvider()
@@ -555,8 +579,7 @@ class CameraManager(
                         )
                         val captureMetadata = metadata?.copy(
                             capturedAtMillis = captureStartedAt,
-                            equivalentFocalLengthMm = focalLength,
-                            exposureCompensationEv = exposureCompensationEv
+                            equivalentFocalLengthMm = focalLength
                         ) ?: CaptureMetadata(
                             capturedAtMillis = captureStartedAt,
                             iso = null,
@@ -588,7 +611,8 @@ class CameraManager(
                                 outputFormat,
                                 jpegQuality,
                                 captureMetadata,
-                                savedImageRotationDegrees
+                                savedImageRotationDegrees,
+                                wdrEnabled
                             )
                         } catch (error: Exception) {
                             completion.finish(CaptureOutputCompletion.Output.BITMAP, false)
@@ -712,14 +736,7 @@ class CameraManager(
             optionsBuilder.setCaptureRequestOption(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_FAST)
         }
 
-        if (appSettings.isWdrMode) {
-            // CONTROL_TONEMAP_MODE_CONTRAST_CURVE = 0
-            optionsBuilder.setCaptureRequestOption(CaptureRequest.TONEMAP_MODE, 0)
-            optionsBuilder.setCaptureRequestOption(CaptureRequest.TONEMAP_CURVE, createWdrCurve())
-        } else {
-            // CONTROL_TONEMAP_MODE_FAST = 1
-            optionsBuilder.setCaptureRequestOption(CaptureRequest.TONEMAP_MODE, 1)
-        }
+        // Leave the vendor's normal camera response intact; WDR is now a local GPU pass.
 
         optionsBuilder.setCaptureRequestOption(CaptureRequest.CONTROL_AE_LOCK, appSettings.isAeLocked)
         if (appSettings.isXpanMode) {
@@ -828,25 +845,6 @@ class CameraManager(
         return Rect(left, top, right, bottom)
     }
 
-    private fun createWdrCurve(): android.hardware.camera2.params.TonemapCurve {
-        val size = 64
-        val curve = FloatArray(size * 2)
-        for (i in 0 until size) {
-            val inVal = i.toFloat() / (size - 1)
-            // WDR Curve: Lift shadows. Standard sRGB is approx x^(1/2.2) = x^0.45
-            // WDR we want to preserve more shadow detail, so effectively a lower gamma power?
-            // Actually, linear raw -> output.
-            // If we use standard gamma 2.2, out = in^(1/2.2).
-            // To lift shadows more, we need a smaller exponent, e.g. 1/3.0 = 0.33.
-            // Or use a custom log-like curve.
-            // Let's use x^0.35
-            val outVal = Math.pow(inVal.toDouble(), 0.35).toFloat().coerceIn(0f, 1f)
-            curve[i * 2] = inVal
-            curve[i * 2 + 1] = outVal
-        }
-        return android.hardware.camera2.params.TonemapCurve(curve, curve, curve)
-    }
-
     fun setExposureCompensation(evValue: Float) {
         val meteringCorrection = if (appSettings.isXpanMode) {
             xpanSoftwareMeteringCorrectionEv
@@ -867,7 +865,8 @@ class CameraManager(
         val stepVal = step.toFloat()
         if (stepVal == 0f) return
 
-        val index = (evValue / stepVal).roundToInt()
+        val protectedEv = evValue + if (appSettings.isWdrMode) LocalToneMapping.HIGHLIGHT_BIAS_EV else 0f
+        val index = (protectedEv / stepVal).roundToInt()
         val clampedIndex = index.coerceIn(range.lower, range.upper)
         if (lastAppliedExposureCompensationIndex == clampedIndex) return
 
@@ -1112,7 +1111,9 @@ class CameraManager(
                     aperture = result.get(CaptureResult.LENS_APERTURE),
                     physicalFocalLengthMm = result.get(CaptureResult.LENS_FOCAL_LENGTH),
                     equivalentFocalLengthMm = appSettings.focalLength,
-                    exposureCompensationEv = appSettings.evVal,
+                    exposureCompensationEv = result.get(CaptureResult.CONTROL_AE_EXPOSURE_COMPENSATION)?.let { index ->
+                        camera?.cameraInfo?.exposureState?.exposureCompensationStep?.toFloat()?.let { index * it }
+                    } ?: appSettings.evVal,
                     isAutoWhiteBalance = whiteBalanceMode?.let {
                         it == CaptureResult.CONTROL_AWB_MODE_AUTO
                     },
@@ -1244,7 +1245,7 @@ class CameraManager(
 
         val safeLuma = meteredLuma.coerceIn(0.03f, 0.97f)
         val errorEv = (
-            ln(XPAN_METERING_TARGET_LUMA / safeLuma) / LN_2
+            ln(LocalToneMapping.meteringTarget(XPAN_METERING_TARGET_LUMA, appSettings.isWdrMode, appSettings.evVal) / safeLuma) / LN_2
             ).coerceIn(-SOFTWARE_METERING_MAX_STEP_EV, SOFTWARE_METERING_MAX_STEP_EV)
         if (abs(errorEv) < SOFTWARE_METERING_DEAD_BAND_EV) return
 

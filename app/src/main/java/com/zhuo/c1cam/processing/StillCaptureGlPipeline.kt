@@ -27,8 +27,8 @@ object StillCaptureGlPipeline {
     private val renderer = CaptureGlRenderer()
 
     fun process(captureId: Long, image: ImageProxy, geometry: StillCaptureGeometry,
-        lut: Lut3D?, configuredDenoiseMode: ChromaDenoiseMode, iso: Int?): Bitmap? =
-        renderer.process(captureId, image, geometry, lut, configuredDenoiseMode, iso)
+        lut: Lut3D?, configuredDenoiseMode: ChromaDenoiseMode, iso: Int?, wdrEnabled: Boolean = false): Bitmap? =
+        renderer.process(captureId, image, geometry, lut, configuredDenoiseMode, iso, wdrEnabled = wdrEnabled)
 
     fun release() = renderer.release()
 }
@@ -53,6 +53,7 @@ internal class CaptureGlRenderer(private val ownsEglContext: Boolean = true) {
     private var eglContext: EGLContext = EGL14.EGL_NO_CONTEXT
     private var eglSurface: EGLSurface = EGL14.EGL_NO_SURFACE
 
+    private val localToneMapping = LocalToneMappingGl()
     private var program = 0
     private var positionLocation = -1
     private var outputCoordLocation = -1
@@ -111,7 +112,8 @@ internal class CaptureGlRenderer(private val ownsEglContext: Boolean = true) {
         lut: Lut3D?,
         configuredDenoiseMode: ChromaDenoiseMode,
         iso: Int?,
-        displayTarget: PreviewRenderTarget? = null
+        displayTarget: PreviewRenderTarget? = null,
+        wdrEnabled: Boolean = false
     ): Bitmap? {
         val isJpeg = image.format == ImageFormat.JPEG
         if (!isJpeg && image.planes.size < 3) {
@@ -165,6 +167,12 @@ internal class CaptureGlRenderer(private val ownsEglContext: Boolean = true) {
             }
             val uploadFinishedNanos = SystemClock.elapsedRealtimeNanos()
 
+            // LTM precedes the existing chroma filter and LUT. The final pass samples this
+            // RGB texture exactly like decoded JPEG; crop/orientation remain unchanged.
+            val mappedTexture = if (wdrEnabled) localToneMapping.render(rawWidth, rawHeight, isJpeg,
+                if (isJpeg) intArrayOf(rgbTextureId, rgbTextureId, rgbTextureId) else planeTextureIds) else 0
+            val rgbInput = isJpeg || wdrEnabled
+            val inputRgbTexture = if (wdrEnabled) mappedTexture else rgbTextureId
             val targetSetupStartedNanos = SystemClock.elapsedRealtimeNanos()
             if (displayTarget == null) ensureOutputTarget(geometry.outputWidth, geometry.outputHeight)
             uploadLutIfNeeded(lut)
@@ -200,10 +208,10 @@ internal class CaptureGlRenderer(private val ownsEglContext: Boolean = true) {
             )
 
             GLES30.glUniform1i(displayTargetLocation, if (displayTarget != null) 1 else 0)
-            GLES30.glUniform1i(rgbInputLocation, if (isJpeg) 1 else 0)
-            bindTexture(if (isJpeg) rgbTextureId else planeTextureIds[0], 0, yTextureLocation)
-            bindTexture(if (isJpeg) rgbTextureId else planeTextureIds[1], 1, uTextureLocation)
-            bindTexture(if (isJpeg) rgbTextureId else planeTextureIds[2], 2, vTextureLocation)
+            GLES30.glUniform1i(rgbInputLocation, if (rgbInput) 1 else 0)
+            bindTexture(if (rgbInput) inputRgbTexture else planeTextureIds[0], 0, yTextureLocation)
+            bindTexture(if (rgbInput) inputRgbTexture else planeTextureIds[1], 1, uTextureLocation)
+            bindTexture(if (rgbInput) inputRgbTexture else planeTextureIds[2], 2, vTextureLocation)
             GLES30.glUniformMatrix3fv(
                 homographyLocation,
                 1,
@@ -278,7 +286,7 @@ internal class CaptureGlRenderer(private val ownsEglContext: Boolean = true) {
                     "readbackMs=${elapsedMillis(readbackStartedNanos, readbackFinishedNanos)} " +
                     "output=${geometry.outputWidth}x${geometry.outputHeight} " +
                     "denoise=${configuredDenoiseMode.resolveForIso(iso).storageValue} " +
-                    "lut=${lut != null} " +
+                    "lut=${lut != null} wdr=$wdrEnabled " +
                     "planes=${image.planes.joinToString { "${it.rowStride}/${it.pixelStride}" }}"
             )
             bitmap
@@ -808,6 +816,7 @@ internal class CaptureGlRenderer(private val ownsEglContext: Boolean = true) {
         if (eglDisplay != EGL14.EGL_NO_DISPLAY ||
             (!ownsEglContext && EGL14.eglGetCurrentContext() != EGL14.EGL_NO_CONTEXT)) {
             if (ownsEglContext) EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)
+            localToneMapping.release()
             if (program != 0) GLES30.glDeleteProgram(program)
             planeTextureIds.filter { it != 0 }.forEach {
                 GLES30.glDeleteTextures(1, intArrayOf(it), 0)

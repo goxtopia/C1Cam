@@ -34,6 +34,7 @@ class AppSettings(private val context: Context) {
     var highIsoPixelBinningMode: PixelBinningMode = PixelBinningMode.TWO_BY_TWO
     var highIsoPixelBinningThreshold: Int = HighIsoPixelBinning.DEFAULT_ISO_THRESHOLD
     var isCropModeOff = false
+    // Keep the preference key: existing WDR users now receive local base/detail mapping.
     var isWdrMode = false
     var focalLength: Int = 24
     var noCropAspectRatio: Float = 0f

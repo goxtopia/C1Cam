@@ -20,7 +20,8 @@ data class PreviewAnalysisPolicy(
 
         fun forMode(
             mode: PreviewDisplayMode,
-            isXpanMode: Boolean = false
+            isXpanMode: Boolean = false,
+            wdrEnabled: Boolean = false
         ): PreviewAnalysisPolicy {
             if (isXpanMode) {
                 return PreviewAnalysisPolicy(
@@ -35,7 +36,7 @@ data class PreviewAnalysisPolicy(
                     useHighestAvailableResolution = false,
                     analysisWidth = CAMERA_ANALYSIS_WIDTH,
                     analysisHeight = CAMERA_ANALYSIS_HEIGHT,
-                    processEveryNthFrame = 0
+                    processEveryNthFrame = if (wdrEnabled) 1 else 0
                 )
                 PreviewDisplayMode.RECTIFIED -> PreviewAnalysisPolicy(
                     useHighestAvailableResolution = false,

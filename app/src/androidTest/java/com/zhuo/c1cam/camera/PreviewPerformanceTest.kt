@@ -28,11 +28,19 @@ class PreviewPerformanceTest {
         val oldMode = settings.previewDisplayMode
         val oldXpan = settings.isXpanMode
         val oldLut = settings.lutName
+        val oldWdr = settings.isWdrMode
         try {
-            for ((xpan, lut) in listOf(true to null, false to null, false to "asset:Folger50.CUBE")) {
+            data class Config(val xpan: Boolean, val mode: PreviewDisplayMode, val lut: String?, val wdr: Boolean)
+            val configs = listOf(false,true).flatMap { wdr -> listOf(
+                Config(true,PreviewDisplayMode.CAMERA,null,wdr),
+                Config(false,PreviewDisplayMode.RECTIFIED,null,wdr),
+                Config(false,PreviewDisplayMode.RECTIFIED,"asset:Folger50.CUBE",wdr))
+            } + Config(false,PreviewDisplayMode.CAMERA,null,true)
+            for ((xpan, mode, lut, wdr) in configs) {
                 settings.imageOutputFormat = ImageOutputFormat.JPEG_DNG
                 settings.isXpanMode = xpan
-                settings.previewDisplayMode = if (xpan) PreviewDisplayMode.CAMERA else PreviewDisplayMode.RECTIFIED
+                settings.previewDisplayMode = mode
+                settings.isWdrMode = wdr
                 settings.lutName = lut
                 settings.save(emptyList())
                 val activity = instrumentation.startActivitySync(Intent(context, MainActivity::class.java)
@@ -42,7 +50,7 @@ class PreviewPerformanceTest {
                     SystemClock.sleep(1800)
                     instrumentation.runOnMainSync {
                         val manager = field(activity, "cameraManager")!!
-                        display = if (xpan) field(manager, "rawAnalysisPreview")!! else {
+                        display = if (xpan || mode == PreviewDisplayMode.CAMERA) field(manager, "rawAnalysisPreview")!! else {
                             runCatching { field(manager, "rectifiedGlPreview") }.getOrNull()
                                 ?: activity.findViewById<ImageView>(R.id.preview_rectified)
                         }
@@ -66,7 +74,7 @@ class PreviewPerformanceTest {
                     val elapsed = SystemClock.elapsedRealtime() - started
                     val frames = if (display is ImageView) changes.toLong() else previous - first
                     val fps = frames * 1000.0 / elapsed
-                    Log.i("PreviewPerf", "xpan=$xpan lut=${lut != null} frames=$frames fps=$fps renderer=${display.javaClass.simpleName}")
+                    Log.i("PreviewPerf", "xpan=$xpan mode=$mode wdr=$wdr lut=${lut != null} frames=$frames fps=$fps renderer=${display.javaClass.simpleName}")
                     assertTrue("Preview stopped delivering frames", frames > 3)
                 } finally {
                     instrumentation.runOnMainSync { activity.finish() }
@@ -83,6 +91,7 @@ class PreviewPerformanceTest {
             settings.previewDisplayMode = oldMode
             settings.isXpanMode = oldXpan
             settings.lutName = oldLut
+            settings.isWdrMode = oldWdr
             settings.save(emptyList())
         }
     }

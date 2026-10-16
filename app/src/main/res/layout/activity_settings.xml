@@ -580,7 +580,7 @@
 
                             <TextView
                                 style="@style/C1_SettingsSwitchLabel"
-                                android:text="Wide dynamic range" />
+                                android:text="WDR · Local tone mapping" />
 
                             <com.google.android.material.materialswitch.MaterialSwitch
                                 android:id="@+id/wdr_switch"

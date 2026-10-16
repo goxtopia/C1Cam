@@ -73,7 +73,8 @@ class ImageProcessor(private val context: Context) {
         outputFormat: ImageOutputFormat,
         jpegQuality: Int,
         captureMetadata: CaptureMetadata,
-        savedImageRotationDegrees: Int
+        savedImageRotationDegrees: Int,
+        wdrEnabled: Boolean = false
     ): ProcessedCapture {
         val processingStartedNanos = SystemClock.elapsedRealtimeNanos()
         val rotationDegrees = imageProxy.imageInfo.rotationDegrees
@@ -98,7 +99,8 @@ class ImageProcessor(private val context: Context) {
                 geometry = geometry,
                 lut = currentLut,
                 configuredDenoiseMode = chromaDenoiseMode,
-                iso = captureMetadata.iso
+                iso = captureMetadata.iso,
+                wdrEnabled = wdrEnabled
             ) ?: run {
                 processingPath = "cpu_fallback"
                 processStillCaptureLegacy(
@@ -115,7 +117,8 @@ class ImageProcessor(private val context: Context) {
                     noCropAspectRatio = noCropAspectRatio,
                     captureMetadata = captureMetadata,
                     rotationDegrees = rotationDegrees,
-                    savedImageRotationDegrees = savedImageRotationDegrees
+                    savedImageRotationDegrees = savedImageRotationDegrees,
+                    wdrEnabled = wdrEnabled
                 )
             }
         } catch (error: Exception) {
@@ -135,7 +138,8 @@ class ImageProcessor(private val context: Context) {
                 noCropAspectRatio = noCropAspectRatio,
                 captureMetadata = captureMetadata,
                 rotationDegrees = rotationDegrees,
-                savedImageRotationDegrees = savedImageRotationDegrees
+                savedImageRotationDegrees = savedImageRotationDegrees,
+                wdrEnabled = wdrEnabled
             )
         } finally {
             imageProxy.close()
@@ -220,11 +224,12 @@ class ImageProcessor(private val context: Context) {
         noCropAspectRatio: Float,
         captureMetadata: CaptureMetadata,
         rotationDegrees: Int,
-        savedImageRotationDegrees: Int
+        savedImageRotationDegrees: Int,
+        wdrEnabled: Boolean = false
     ): Bitmap {
         val startedNanos = SystemClock.elapsedRealtimeNanos()
         val bitmap = try {
-            if (chromaDenoiseMode != ChromaDenoiseMode.OFF && imageProxy.format == ImageFormat.YUV_420_888) {
+            if (!wdrEnabled && chromaDenoiseMode != ChromaDenoiseMode.OFF && imageProxy.format == ImageFormat.YUV_420_888) {
                 ChromaNoiseReduction.process(
                     image = imageProxy,
                     configuredMode = chromaDenoiseMode,
@@ -238,12 +243,18 @@ class ImageProcessor(private val context: Context) {
             imageProxy.toBitmap()
         }
 
+        val mappedBitmap = if (wdrEnabled) {
+            val mutable = if (bitmap.isMutable) bitmap else bitmap.copy(Bitmap.Config.ARGB_8888, true).also { bitmap.recycle() }
+            LocalToneMapping.apply(mutable)
+            LocalToneMapping.denoiseChroma(mutable, chromaDenoiseMode.resolveForIso(captureMetadata.iso))
+            mutable
+        } else bitmap
         val uprightBitmap = if (rotationDegrees != 0) {
             val m = Matrix()
             m.postRotate(rotationDegrees.toFloat())
-            Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, m, true)
+            Bitmap.createBitmap(mappedBitmap, 0, 0, mappedBitmap.width, mappedBitmap.height, m, true)
         } else {
-            bitmap
+            mappedBitmap
         }
 
         val finalBitmap = if (isCropModeOff) {
@@ -305,11 +316,14 @@ class ImageProcessor(private val context: Context) {
         currentLut: Lut3D?,
         isCropModeOff: Boolean,
         focalLength: Int,
-        noCropAspectRatio: Float
+        noCropAspectRatio: Float,
+        wdrEnabled: Boolean = false
     ): Bitmap {
         val rotationDegrees = imageProxy.imageInfo.rotationDegrees
         // This allocation is hard to avoid without custom YUV converter
-        val bitmap = imageProxy.toBitmap()
+        val decoded = imageProxy.toBitmap()
+        val bitmap = if (wdrEnabled && !decoded.isMutable) decoded.copy(Bitmap.Config.ARGB_8888, true).also { decoded.recycle() } else decoded
+        if (wdrEnabled) LocalToneMapping.apply(bitmap)
 
         // 1. Rotate to upright
         val w = bitmap.width

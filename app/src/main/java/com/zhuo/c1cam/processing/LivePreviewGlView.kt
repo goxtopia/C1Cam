@@ -11,7 +11,7 @@ import javax.microedition.khronos.opengles.GL10
 
 /** Sends YUV directly to a display surface, with no Bitmap allocation or GPU readback. */
 class LivePreviewGlView(context: Context) : GLSurfaceView(context), GLSurfaceView.Renderer {
-    private data class Frame(val image: ImageProxy, val geometry: StillCaptureGeometry, val lut: Lut3D?)
+    private data class Frame(val image: ImageProxy, val geometry: StillCaptureGeometry, val lut: Lut3D?, val wdrEnabled: Boolean)
     private val pending = AtomicReference<Frame?>()
     private var renderer = CaptureGlRenderer(ownsEglContext = false)
     private var surfaceWidth = 0
@@ -39,12 +39,12 @@ class LivePreviewGlView(context: Context) : GLSurfaceView(context), GLSurfaceVie
     }
 
     /** Takes ownership even when hidden; every submitted image is eventually closed. */
-    fun submit(image: ImageProxy, geometry: StillCaptureGeometry, lut: Lut3D?) {
+    fun submit(image: ImageProxy, geometry: StillCaptureGeometry, lut: Lut3D?, wdrEnabled: Boolean = false) {
         if (!acceptingFrames) {
             image.close()
             return
         }
-        pending.getAndSet(Frame(image, geometry, lut))?.image?.close()
+        pending.getAndSet(Frame(image, geometry, lut, wdrEnabled))?.image?.close()
         // A hide/detach may race with submission from the analyzer.
         if (!acceptingFrames) pending.getAndSet(null)?.image?.close()
         else requestRender()
@@ -73,7 +73,7 @@ class LivePreviewGlView(context: Context) : GLSurfaceView(context), GLSurfaceVie
             val before = renderer.renderedFrames
             val started = System.nanoTime()
             renderer.process(0, frame.image, frame.geometry, frame.lut, ChromaDenoiseMode.OFF,
-                null, PreviewRenderTarget(surfaceWidth, surfaceHeight))
+                null, PreviewRenderTarget(surfaceWidth, surfaceHeight), frame.wdrEnabled)
             if (renderer.renderedFrames > before) {
                 lastGeometry = frame.geometry
                 totalRenderNanos += System.nanoTime() - started

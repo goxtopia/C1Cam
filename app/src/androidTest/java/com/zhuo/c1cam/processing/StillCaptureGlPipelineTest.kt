@@ -46,6 +46,7 @@ class StillCaptureGlPipelineTest {
                 listOf(Color.YELLOW, Color.BLUE, Color.GREEN, Color.RED),
                 listOf(Color.GREEN, Color.YELLOW, Color.RED, Color.BLUE)
             )
+            listOf(false, true).forEach { wdr ->
             listOf(0, 90, 180, 270).forEachIndexed { index, rotation ->
                 val geometry = com.zhuo.c1cam.camera.PreviewFrameGeometry.forXpan(96, 64, rotation,
                     com.zhuo.c1cam.xpan.XpanMode.ASPECT_RATIO)
@@ -53,7 +54,7 @@ class StillCaptureGlPipelineTest {
                 instrumentation.runOnMainSync {
                     display.layoutParams = android.widget.FrameLayout.LayoutParams(
                         geometry.outputWidth, geometry.outputHeight)
-                    display.submit(TestImage(ImageFormat.JPEG, 96, 64, arrayOf(plane(bytes, 96))), geometry, null)
+                    display.submit(TestImage(ImageFormat.JPEG, 96, 64, arrayOf(plane(bytes, 96))), geometry, null, wdr)
                 }
                 val deadline = android.os.SystemClock.elapsedRealtime() + 10_000
                 while (display.renderedFrames <= before && android.os.SystemClock.elapsedRealtime() < deadline) {
@@ -72,13 +73,14 @@ class StillCaptureGlPipelineTest {
                     }
                     assertTrue(done.await(5, java.util.concurrent.TimeUnit.SECONDS))
                     assertEquals(android.view.PixelCopy.SUCCESS, result)
-                    assertColor(expected[index][0], copy.getPixel(copy.width / 4, copy.height / 4))
-                    assertColor(expected[index][1], copy.getPixel(copy.width * 3 / 4, copy.height / 4))
-                    assertColor(expected[index][2], copy.getPixel(copy.width / 4, copy.height * 3 / 4))
-                    assertColor(expected[index][3], copy.getPixel(copy.width * 3 / 4, copy.height * 3 / 4))
+                    assertColor(expected[index][0], copy.getPixel(copy.width / 4, copy.height / 4), if (wdr) 35.0 else 8.0)
+                    assertColor(expected[index][1], copy.getPixel(copy.width * 3 / 4, copy.height / 4), if (wdr) 35.0 else 8.0)
+                    assertColor(expected[index][2], copy.getPixel(copy.width / 4, copy.height * 3 / 4), if (wdr) 35.0 else 8.0)
+                    assertColor(expected[index][3], copy.getPixel(copy.width * 3 / 4, copy.height * 3 / 4), if (wdr) 35.0 else 8.0)
                 } finally {
                     copy.recycle()
                 }
+            }
             }
         } finally {
             source.recycle()
@@ -146,6 +148,80 @@ class StillCaptureGlPipelineTest {
         }
     }
 
+    @Test
+    fun localWdrProtectsBlackMaterialRetainsTextureAndPrecedesLut() {
+        val instrumentation = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val activity = instrumentation.startActivitySync(android.content.Intent(context,
+            com.zhuo.c1cam.ui.MainActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+        val w = 512; val h = 320
+        val luma = ByteArray(w*h) { i ->
+            val x=i%w; val y=i/w
+            (when {
+                x in 370..390 && y in 130..190 -> 24 // black material in a bright environment
+                x < 256 -> if ((x/2)%2==0) 52 else 60 // texture in a broad dark region
+                else -> 224
+            }).toByte()
+        }
+        val image = TestImage(ImageFormat.YUV_420_888,w,h,arrayOf(plane(luma,w),
+            plane(ByteArray(w*h/4){128.toByte()},w/2),plane(ByteArray(w*h/4){128.toByte()},w/2)))
+        val geometry = StillCaptureGeometry.create(w,h,0,emptyList(),w,h,0f,true,24,0f,0)
+        val output = mutableListOf<Bitmap>()
+        fun mapped(lut: Lut3D? = null, denoise: ChromaDenoiseMode = ChromaDenoiseMode.OFF, enabled: Boolean = true): Bitmap =
+            checkNotNull(StillCaptureGlPipeline.process(77,image,geometry,lut,denoise,800,enabled)) {
+                "WDR unexpectedly fell back from GPU"
+            }.also { output.add(it) }
+        try {
+            val original = mapped(enabled=false)
+            val result = mapped()
+            fun value(b: Bitmap,x: Int,y: Int=160)=Color.green(b.getPixel(x,y))
+            assertTrue("Broad shadows were not lifted",value(result,100)>value(original,100)+20)
+            assertTrue("Black material was washed out",value(result,380)<=value(original,380)+5)
+            assertTrue("Dark halo at illumination boundary",value(result,252)>=value(result,100)-20)
+            val beforeContrast = LocalToneMapping.logLuma(LocalToneMapping.linear(value(original,102)/255f))-
+                LocalToneMapping.logLuma(LocalToneMapping.linear(value(original,100)/255f))
+            val afterContrast = LocalToneMapping.logLuma(LocalToneMapping.linear(value(result,102)/255f))-
+                LocalToneMapping.logLuma(LocalToneMapping.linear(value(result,100)/255f))
+            assertEquals("Texture contrast was compressed",beforeContrast,afterContrast,.12f)
+            val cpu = original.copy(Bitmap.Config.ARGB_8888,true).also { output.add(it) }
+            LocalToneMapping.apply(cpu)
+            for (x in listOf(100,102,260,380,450)) assertEquals("CPU/GPU mismatch at $x",
+                value(cpu,x).toDouble(),value(result,x).toDouble(),4.0)
+            val lut = Lut3D(2,FloatArray(24).apply {
+                for (b in 0..1) for (g in 0..1) for (r in 0..1) {
+                    val i=(b*4+g*2+r)*3
+                    this[i]=r*.5f; this[i+1]=g*.5f; this[i+2]=b*.5f
+                }
+            })
+            val graded = mapped(lut)
+            assertEquals("LUT must run after WDR",value(result,100)*.5,value(graded,100).toDouble(),2.0)
+            val denoised = mapped(denoise=ChromaDenoiseMode.HIGH)
+            assertEquals(value(result,100).toDouble(),value(denoised,100).toDouble(),3.0)
+            // Changing input format, size and WDR state must not leave stale guide textures/uniforms.
+            val jpegBytes = ByteArrayOutputStream().also { original.compress(Bitmap.CompressFormat.JPEG,100,it) }.toByteArray()
+            val jpeg = TestImage(ImageFormat.JPEG,w,h,arrayOf(plane(jpegBytes,w)))
+            val jpegResult = checkNotNull(StillCaptureGlPipeline.process(78,jpeg,geometry,null,
+                ChromaDenoiseMode.OFF,800,true)).also { output.add(it) }
+            assertEquals(value(result,100).toDouble(),value(jpegResult,100).toDouble(),4.0)
+            val reset = mapped(enabled=false)
+            assertEquals(value(original,100),value(reset,100))
+            // Save synthetic comparison only in the isolated test app's private cache.
+            val comparison = Bitmap.createBitmap(w*3,h,Bitmap.Config.ARGB_8888)
+            val canvas=android.graphics.Canvas(comparison)
+            canvas.drawBitmap(original,0f,0f,null); canvas.drawBitmap(result,w.toFloat(),0f,null)
+            canvas.drawBitmap(cpu,(w*2).toFloat(),0f,null)
+            java.io.File(context.cacheDir,"wdr-comparison.png").outputStream().use {
+                comparison.compress(Bitmap.CompressFormat.PNG,100,it)
+            }
+            comparison.recycle()
+        } finally {
+            output.forEach { it.recycle() }
+            StillCaptureGlPipeline.release()
+            instrumentation.runOnMainSync { activity.finish() }
+            instrumentation.waitForIdleSync(); awaitDestroyed(activity)
+        }
+    }
+
     private fun awaitDestroyed(activity: android.app.Activity) {
         val deadline = android.os.SystemClock.elapsedRealtime() + 5000
         while (!activity.isDestroyed && android.os.SystemClock.elapsedRealtime() < deadline) {
@@ -162,10 +238,10 @@ class StillCaptureGlPipelineTest {
         }
     }
 
-    private fun assertColor(expected: Int, actual: Int) {
-        assertEquals(Color.red(expected).toDouble(), Color.red(actual).toDouble(), 8.0)
-        assertEquals(Color.green(expected).toDouble(), Color.green(actual).toDouble(), 8.0)
-        assertEquals(Color.blue(expected).toDouble(), Color.blue(actual).toDouble(), 8.0)
+    private fun assertColor(expected: Int, actual: Int, tolerance: Double = 8.0) {
+        assertEquals(Color.red(expected).toDouble(), Color.red(actual).toDouble(), tolerance)
+        assertEquals(Color.green(expected).toDouble(), Color.green(actual).toDouble(), tolerance)
+        assertEquals(Color.blue(expected).toDouble(), Color.blue(actual).toDouble(), tolerance)
     }
 
     private fun plane(bytes: ByteArray, stride: Int) = object : ImageProxy.PlaneProxy {

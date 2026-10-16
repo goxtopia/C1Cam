@@ -206,16 +206,6 @@ class FocusModeTest {
     }
 
     @Test
-    fun log_lut_should_be_brighter_than_scene_linear_after_wdr_restore() {
-        val wdrMidTone = Math.pow(0.5, 0.35).toFloat()
-        val expectedDisplayMidTone = Math.pow(0.5, 1.0 / 2.2).toFloat()
-        val restoredDisplayMidTone = Math.pow(wdrMidTone.toDouble(), 1.0 / (0.35 * 2.2)).toFloat()
-
-        assertTrue(restoredDisplayMidTone > 0.5f)
-        assertEquals(expectedDisplayMidTone, restoredDisplayMidTone, 0.0001f)
-    }
-
-    @Test
     fun tap_to_focus_uses_auto_focus_only_mode_when_enabled_in_settings() {
         assertTrue(FocusModeUiModel.isTapToFocusEnabled(FocusMode.AUTO, true))
         assertFalse(FocusModeUiModel.isTapToFocusEnabled(FocusMode.AUTO, false))

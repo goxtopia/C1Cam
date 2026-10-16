@@ -36,7 +36,19 @@ DNG 需要相机硬件支持 RAW 与 JPG 同时输出。设备不支持 RAW，�
 
 - 支持预览与复原画面切换、闲置超时设置、锁屏相机入口。
 - Sport（运动）模式和手动对焦在部分设备上可能冲突，导致预览黑屏；遇到此情况请关闭其中一项。
-- WDR 为实验功能，效果与兼容性仍需按设备验证。
+### 局部 WDR
+
+WDR 已替换为基底层与细节层分解的局部色调映射，移除了旧的相机端全局提亮曲线。开启后：
+
+1. 在用户 EV 和测光修正之上增加约 **−0.7 EV** 高光保护，按设备曝光步长取整并限制在支持范围内；XPAN 软件测光使用对应目标亮度，AE 锁定仍停止自动测光修正。
+2. 将解码后的 YUV / JPG 转为线性亮度，以对数亮度的边缘感知双边滤波提取基底层。只压缩基底的光照范围，细节层以单位增益重组；较大范围的环境亮度与相对黑位约束，抑制亮背景中黑字、深色物体的过度提亮。
+3. WDR 输出进入现有色度降噪，再进入 ToneMapPreset / 3D LUT，之后按构图保存。预览也使用局部 WDR；XPAN 保持原有画幅与方向处理。
+
+GPU 使用最长边 256 像素的亮度引导图与边缘感知上采样，保留全分辨率纹理；复用纹理与帧缓冲，预览无 CPU 图像回读。GPU 不可用时有 CPU 回退。旧 WDR 开关设置会直接使用新算法。
+
+这是单帧色调映射，不是多帧 HDR；无法恢复已截断高光或没有被采集的暗部信息，提亮也可能显露噪声。DNG 不应用 WDR、降噪或 LUT，但记录的是高光保护曝光下采集的原始数据。
+
+算法参考：[Durand 与 Dorsey 的双边滤波 HDR 色调映射](https://people.csail.mit.edu/fredo/PUBLI/Siggraph2002/)。
 
 ## 构建与签名
 
@@ -76,6 +88,10 @@ C1Cam is an independent, open-source Android camera focused on manual shooting, 
 
 JPG + DNG captures both outputs from the same exposure. The JPG receives the selected crop, color and image processing; the DNG preserves the original sensor data. DNG writes run on a separate background worker alongside JPG processing and saving. Both files share a timestamp-based name in `Pictures/C1Cam`. RAW capture requires compatible camera hardware and stream configuration; otherwise the app reports the limitation and saves JPG only.
 
-Sport mode may conflict with manual focus on some devices. WDR remains experimental.
+Sport mode may conflict with manual focus on some devices.
+
+WDR now uses edge-aware log-luminance base/detail decomposition instead of the old global camera curve. It compresses illumination in the base, retains unit-gain detail, and uses ambient brightness and relative-black guards to limit lifting dark materials in bright surroundings. The pipeline is local WDR → chroma denoise → ToneMapPreset / 3D LUT. A shared GPU implementation processes preview and stills, using a small illumination guide with full-resolution reconstruction and no preview readback; CPU fallback is available. XPAN crop and orientation use the existing geometry.
+
+Enabling WDR adds about −0.7 EV to the user's exposure and metering corrections (rounded/clamped to camera support). XPAN software metering uses a matching target to avoid cancelling this bias. This is single-frame mapping: clipped highlights and missing shadow information cannot be recovered, and lifted shadows can reveal noise. DNG remains unprocessed, while retaining the highlight-protected capture exposure.
 
 Build with JDK 17 and Android SDK 36 using `./gradlew assembleRelease`. The signed APK is written to `app/build/outputs/apk/release/app-release.apk`. The permanent release key and its credentials are intentionally included in [signing/](signing/) and used automatically by Gradle.

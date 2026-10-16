@@ -42,6 +42,8 @@ class CameraCaptureIntegrationTest {
         val oldFormat = settings.imageOutputFormat
         val oldPreview = settings.previewDisplayMode
         val oldXpan = settings.isXpanMode
+        val oldWdr = settings.isWdrMode
+        val oldEv = settings.evVal
         val created = mutableSetOf<android.net.Uri>()
         fun ownPhotos(): Map<android.net.Uri, String> {
             val rows = linkedMapOf<android.net.Uri, String>()
@@ -62,7 +64,10 @@ class CameraCaptureIntegrationTest {
                 Triple(PreviewDisplayMode.CAMERA, false, ImageOutputFormat.JPEG),
                 Triple(PreviewDisplayMode.CAMERA, false, ImageOutputFormat.PNG)
             )
+            for (wdr in listOf(false,true)) {
             for ((mode, xpan, format) in configurations) {
+                settings.isWdrMode = wdr
+                settings.evVal = 0f
                 settings.imageOutputFormat = format
                 settings.previewDisplayMode = mode
                 settings.isXpanMode = xpan
@@ -87,12 +92,12 @@ class CameraCaptureIntegrationTest {
                         }
                         open
                     }
-                    if (xpan || mode == PreviewDisplayMode.RECTIFIED) {
+                    if (xpan || wdr || mode == PreviewDisplayMode.RECTIFIED) {
                         waitUntil(10_000) {
                             var ready = false
                             instrumentation.runOnMainSync {
                                 val display = field(checkNotNull(manager),
-                                    if (xpan) "rawAnalysisPreview" else "rectifiedGlPreview")
+                                    if (xpan || mode == PreviewDisplayMode.CAMERA) "rawAnalysisPreview" else "rectifiedGlPreview")
                                     as? com.zhuo.c1cam.processing.LivePreviewGlView
                                 ready = (display?.renderedFrames ?: 0) > 0
                                 if (ready && xpan && settings.xpanAspectRatio > 0f) {
@@ -107,6 +112,22 @@ class CameraCaptureIntegrationTest {
                             }
                             ready
                         }
+                    }
+                    var expectedBias = 0f
+                    if (!xpan) waitUntil(5_000) {
+                        var matched = false
+                        instrumentation.runOnMainSync {
+                            val camera = field(checkNotNull(manager), "camera") as Camera
+                            val exposure = camera.cameraInfo.exposureState
+                            val step = exposure.exposureCompensationStep.toFloat()
+                            val index = if (!exposure.isExposureCompensationSupported || step == 0f) 0 else
+                                kotlin.math.round((if (wdr) -.7f else 0f)/step).toInt().coerceIn(
+                                    exposure.exposureCompensationRange.lower,exposure.exposureCompensationRange.upper)
+                            expectedBias = index*step
+                            val metadata = field(checkNotNull(manager),"latestCaptureMetadata") as? com.zhuo.c1cam.capture.CaptureMetadata
+                            matched = metadata != null && kotlin.math.abs(metadata.exposureCompensationEv-expectedBias)<.01f
+                        }
+                        matched
                     }
                     instrumentation.runOnMainSync {
                         assertEquals("Incorrect output format in $mode preview",
@@ -148,6 +169,9 @@ class CameraCaptureIntegrationTest {
                                 val exif = ExifInterface(checkNotNull(stream))
                                 assertTrue(exif.getAttributeInt(ExifInterface.TAG_IMAGE_WIDTH, 0) > 0)
                                 assertTrue(exif.getAttributeInt(ExifInterface.TAG_IMAGE_LENGTH, 0) > 0)
+                                if (!xpan && photos[uri]?.endsWith(".jpg") == true) assertEquals(
+                                    "Saved JPG must record physical WDR exposure bias",expectedBias.toDouble(),
+                                    exif.getAttributeDouble(ExifInterface.TAG_EXPOSURE_BIAS_VALUE,99.0),.02)
                             }
                         }
                     }
@@ -157,11 +181,14 @@ class CameraCaptureIntegrationTest {
                     waitUntil(5_000) { activity.isDestroyed }
                 }
             }
+            }
         } finally {
             created.forEach { context.contentResolver.delete(it, null, null) }
             settings.imageOutputFormat = oldFormat
             settings.previewDisplayMode = oldPreview
             settings.isXpanMode = oldXpan
+            settings.isWdrMode = oldWdr
+            settings.evVal = oldEv
             settings.save(emptyList())
         }
     }
